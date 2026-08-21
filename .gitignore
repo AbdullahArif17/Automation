@@ -36,3 +36,7 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Test temp dir
+.pytest_tmp/
+.pytest_cache/

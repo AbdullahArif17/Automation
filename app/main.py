@@ -10,6 +10,7 @@ import argparse
 import sys
 
 from app.config.settings import get_settings
+from app.storage.database import Database
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -43,6 +44,21 @@ def _not_implemented(phase: str) -> None:
     print(f"[Phase 1] {phase} reserved for a later phase.")
 
 
+def _handle_status(settings) -> None:
+    db = Database(settings.db_path)
+    try:
+        jobs = db.fetchall(
+            "SELECT id, topic, state, updated_at FROM publishing_jobs ORDER BY id DESC LIMIT 20"
+        )
+        print(f"\n=== Jobs ({len(jobs)}) ===")
+        for j in jobs:
+            print(f"  #{j['id']} [{j['state']}] {j['topic']}  ({j['updated_at']})")
+        if not jobs:
+            print("  (no jobs yet)")
+    finally:
+        db.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -66,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.analytics:
         _not_implemented("Analytics")
     if args.status:
-        _not_implemented("Status")
+        _handle_status(settings)
 
     if not any([args.topic, args.dry_run, args.generate,
                 args.upload, args.analytics, args.status, args.version]):
