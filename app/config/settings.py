@@ -108,7 +108,8 @@ class Settings:
             rel = url[len("sqlite:///"):]
             if rel.startswith("/"):
                 return Path(rel)
-            return self.data_dir / rel
+            # Relative path resolves against the project root (e.g. data/app.db).
+            return BASE_DIR / rel
         return self.data_dir / "app.db"
 
     def to_dict(self) -> dict[str, Any]:
