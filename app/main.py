@@ -1,16 +1,19 @@
 """CLI entry point for the YouTube Shorts automation pipeline.
 
-Phase 1 implements the command surface only. Subcommands that depend on later
-phases (research, generate, upload, analytics) are wired but report that the
-phase is not yet implemented.
+Command surface: --topic, --dry-run, --generate, --upload, --analytics,
+--status, --version. Publishing is disabled by default.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from app.config.settings import get_settings
-from app.storage.database import Database
+from app.storage.database import Database, JobState
+from app.ai.provider import MockProvider
+from app.ai.gemini import GeminiProvider
+from app.content.script_generator import ScriptGenerator
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -32,16 +35,59 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Collect and print YouTube analytics")
     parser.add_argument("--status", action="store_true",
                         help="Show pipeline and job status")
+    parser.add_argument("--mock-llm", action="store_true",
+                        help="Use a free mock LLM (no API key, no cost) for local testing")
     parser.add_argument("--version", action="store_true", help="Print version")
     return parser
 
 
-def _not_implemented(phase: str) -> None:
-    logger.warning(
-        f"{phase} is not implemented in this phase. Continuing with Phase 1 skeleton.",
-        extra={"stage": "cli", "status": "skipped"},
-    )
-    print(f"[Phase 1] {phase} reserved for a later phase.")
+def _build_provider(settings, mock: bool):
+    if mock:
+        logger.info("using mock LLM provider (no cost)", extra={"stage": "cli", "status": "mock"})
+        # Seed with valid script + passing-quality responses so the generate
+        # flow completes without a key (3 candidates, attempt 1 passes).
+        script_json = json.dumps({
+            "script": "This is a mock script for the topic. It reads naturally and "
+                      "stays accurate to the facts. Local, free tooling makes this possible.",
+            "hook": "Mock hook line.", "duration_estimate_seconds": 30,
+        })
+        quality_json = json.dumps({
+            "hook": 9, "accuracy": 9, "clarity": 9, "retention": 9, "novelty": 9,
+            "pacing": 9, "visual_potential": 8, "naturalness": 9, "policy_risk": 0,
+            "total": 8.8, "verdict": "pass", "notes": "mock evaluation",
+        })
+        responses = [script_json, script_json, script_json,
+                     quality_json, quality_json, quality_json]
+        return MockProvider(responses)
+    try:
+        return GeminiProvider()
+    except RuntimeError as exc:
+        logger.error(str(exc), extra={"stage": "cli", "status": "error"})
+        print(f"[error] {exc}. Set GEMINI_API_KEY or pass --mock-llm for local testing.")
+        sys.exit(2)
+
+
+def _handle_generate(settings, topic: str, mock: bool) -> None:
+    provider = _build_provider(settings, mock)
+    generator = ScriptGenerator(provider, num_candidates=3,
+                                 max_attempts=settings.max_regeneration_attempts)
+    db = Database(settings.db_path)
+    job_id = db.create_job(topic)
+    db.set_job_state(job_id, JobState.SCRIPTING, stage="script")
+    try:
+        best = generator.generate(topic, summary="", facts=[], job_id=str(job_id))
+        if best and best.evaluation and best.evaluation.passed:
+            db.set_job_state(job_id, JobState.SCRIPT_APPROVED, stage="script")
+        else:
+            db.set_job_state(job_id, JobState.FAILED, stage="script")
+            db.log_error("script", "no script passed quality threshold", job_id=job_id)
+    finally:
+        db.close()
+    print("\n=== Generated Script ===")
+    print(best.text)
+    print(f"\nScore: {best.score} | Passed: {best.evaluation.passed if best.evaluation else False}")
+    if best.evaluation:
+        print("Notes:", best.evaluation.notes)
 
 
 def _handle_status(settings) -> None:
@@ -69,18 +115,24 @@ def main(argv: list[str] | None = None) -> int:
         print("youtube-shorts-automation 0.1.0")
         return 0
 
-    if args.topic:
-        logger.info(f"target topic: {args.topic}", extra={"stage": "cli", "status": "topic"})
-        print(f"[Phase 1] Topic received: {args.topic}")
-
     if args.dry_run:
-        _not_implemented("Dry run")
+        print("[dry-run] pipeline planning is implemented in later phases.")
+
     if args.generate:
-        _not_implemented("Generation")
+        if not args.topic:
+            print("[error] --generate requires --topic \"your topic\".")
+            return 2
+        _handle_generate(settings, args.topic, args.mock_llm)
+        return 0
+
+    if args.topic and not args.generate:
+        logger.info(f"target topic: {args.topic}", extra={"stage": "cli", "status": "topic"})
+        print(f"[info] Topic received: {args.topic} (use --generate to produce a script)")
+
     if args.upload:
-        _not_implemented("Upload")
+        print("[info] Upload is reserved for Phase 10 (disabled by default).")
     if args.analytics:
-        _not_implemented("Analytics")
+        print("[info] Analytics is reserved for Phase 11.")
     if args.status:
         _handle_status(settings)
 
@@ -88,10 +140,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.upload, args.analytics, args.status, args.version]):
         parser.print_help()
 
-    logger.info(
-        "config loaded",
-        extra={"stage": "config", "status": "ok", "job_id": None},
-    )
+    logger.info("config loaded", extra={"stage": "config", "status": "ok"})
     return 0
 
 

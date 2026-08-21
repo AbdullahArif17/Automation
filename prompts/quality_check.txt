@@ -1,0 +1,24 @@
+You are a strict quality evaluator for YouTube Shorts scripts about AI and tech.
+
+Script: {script}
+Facts to verify against: {facts}
+
+Score the script 0-10 on each axis. Be critical.
+
+Return ONLY valid JSON:
+{
+  "hook": 0,
+  "accuracy": 0,
+  "clarity": 0,
+  "retention": 0,
+  "novelty": 0,
+  "pacing": 0,
+  "visual_potential": 0,
+  "naturalness": 0,
+  "policy_risk": 0,
+  "total": 0.0,
+  "verdict": "pass" | "fail",
+  "notes": "short justification"
+}
+
+Penalize: invented facts, greetings, filler, run-on sentences, clickbait, policy violations (medical/financial/defamatory).
