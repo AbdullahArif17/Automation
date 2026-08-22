@@ -1,0 +1,41 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.coverage
+htmlcov
+.tox
+.venv
+venv
+env
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+.pytest_tmp
+data/app.db
+output/*.mp4
+assets/cache
+*.log
+
+# Test files (not needed in prod image)
+tests/
+*.md
+!README.md
+
+# CI
+.github/

@@ -1,0 +1,99 @@
+name: Daily YouTube Shorts Generation
+
+# Runs twice daily on GitHub's free runners (Ubuntu).
+# Requires: repository secrets for GEMINI_API_KEY, YOUTUBE_CLIENT_ID, etc.
+# Cost: ~5 min/run * 2 runs/day * 30 days = ~300 min/month (well within 2000 free tier).
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # 06:00 UTC
+    - cron: "0 18 * * *"  # 18:00 UTC
+  workflow_dispatch:       # manual trigger
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # All secrets injected from repository settings
+      APP_ENV: production
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL: gemini-2.5-flash
+      YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+      YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+      YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+      CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+      POSTS_PER_DAY: 1
+      AUTO_UPLOAD: "true"
+      AUTO_PUBLISH: "true"      # set to "false" for private drafts
+      MAX_DAILY_GENERATIONS: 1
+      TTS_PROVIDER: local
+      MEDIA_PROVIDER: free
+      DATABASE_URL: sqlite:///data/app.db
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg espeak-ng
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+
+      - name: Create data/output dirs
+        run: |
+          mkdir -p data output assets
+
+      - name: Run generation (1 Short)
+        run: |
+          python -m app.scheduler run-once
+
+      - name: Upload artifacts (logs, video)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shorts-output-${{ github.run_id }}
+          path: |
+            output/*.mp4
+            data/app.db
+          retention-days: 7
+
+  # Optional: analytics collection (separate job, runs less frequently)
+  analytics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'schedule' && github.event.schedule == '0 6 * * *'
+    env:
+      APP_ENV: production
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+      YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+      YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+      CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+      DATABASE_URL: sqlite:///data/app.db
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+      - run: pip install -e .
+      - run: mkdir -p data
+      - name: Collect analytics
+        run: |
+          python -m app.main --analytics

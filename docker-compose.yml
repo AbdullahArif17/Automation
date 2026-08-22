@@ -1,0 +1,53 @@
+version: "3.9"
+
+services:
+  shorts:
+    build:
+      context: .
+      target: base
+    container_name: yt-shorts-auto
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+      - ./assets:/app/assets
+      - ./prompts:/app/prompts
+    # Healthcheck inherited from Dockerfile
+    # Runs: python -m app.scheduler run-loop --interval 3600
+
+  # Optional: run tests in dev container
+  shorts-dev:
+    build:
+      context: .
+      target: dev
+    container_name: yt-shorts-dev
+    volumes:
+      - ./app:/app/app
+      - ./tests:/app/tests
+      - ./prompts:/app/prompts
+      - ./data:/app/data
+    env_file:
+      - .env
+    command: ["python", "-m", "pytest", "tests/", "-q"]
+    profiles:
+      - dev
+
+  # One-shot generation (useful for manual runs)
+  shorts-gen:
+    build:
+      context: .
+      target: base
+    container_name: yt-shorts-gen
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+      - ./assets:/app/assets
+      - ./prompts:/app/prompts
+    entrypoint: ["python", "-m", "app.main"]
+    # Usage: docker compose run --rm shorts-gen --generate --topic "AI news" --mock-llm
+    profiles:
+      - manual

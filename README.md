@@ -58,6 +58,20 @@ python -m app.main --analytics
 python -m app.main --status
 ```
 
+### Scheduler (local / server)
+
+```bash
+# One-shot (for cron / Task Scheduler)
+python -m app.scheduler run-once
+
+# Blocking loop (local dev / container)
+python -m app.scheduler run-loop --interval 3600
+
+# Install helpers (prints crontab entry / creates Windows tasks)
+python -m app.scheduler install --cron
+python -m app.scheduler install --windows
+```
+
 Publishing is disabled by default (`AUTO_UPLOAD=false`). One-time setup, then
 schedule locally (cron / Task Scheduler) or via GitHub Actions.
 
@@ -96,6 +110,32 @@ size limits. Least-privilege OAuth scopes.
 ## Compliance
 
 Original content only. Licensed/permitted media. No reuploads or scraped clips.
+
+## Docker
+
+```bash
+# Build
+docker compose build shorts
+
+# Run daily loop in container (uses host .env)
+docker compose up -d shorts
+
+# One-shot generation (manual)
+docker compose run --rm shorts-gen --generate --topic "AI news" --mock-llm
+
+# Run tests in dev container
+docker compose --profile dev up shorts-dev
+```
+
+## Free Cloud (GitHub Actions)
+
+The `.github/workflows/daily-shorts.yml` runs twice daily on GitHub's free
+Ubuntu runners (~5 min/run, well within the 2000 min/month free tier).
+
+1. Add repository secrets: `GEMINI_API_KEY`, `YOUTUBE_CLIENT_ID`,
+   `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN`, `CHANNEL_ID`.
+2. Enable Actions on the repo.
+3. Set `AUTO_UPLOAD=true`, `AUTO_PUBLISH=true` in workflow env (or secrets).
 
 ## Project Structure
 
