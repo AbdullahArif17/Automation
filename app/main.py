@@ -1,7 +1,7 @@
 """CLI entry point for the YouTube Shorts automation pipeline.
 
 Command surface: --topic, --dry-run, --generate, --upload, --analytics,
---status, --version. Publishing is disabled by default.
+--status, --version. Publishing is disabled by default (AUTO_UPLOAD=false).
 """
 from __future__ import annotations
 
@@ -14,6 +14,8 @@ from app.storage.database import Database, JobState
 from app.ai.provider import MockProvider
 from app.ai.gemini import GeminiProvider
 from app.content.script_generator import ScriptGenerator
+from app.youtube.auth import YouTubeAuth
+from app.youtube.uploader import YouTubeUploader
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -105,6 +107,58 @@ def _handle_status(settings) -> None:
         db.close()
 
 
+def _handle_upload(settings) -> None:
+    """Upload READY videos. Respects AUTO_UPLOAD (disabled by default)."""
+    if not settings.auto_upload:
+        logger.warning("AUTO_UPLOAD is false; refusing to publish",
+                       extra={"stage": "upload", "status": "blocked"})
+        print("[blocked] AUTO_UPLOAD=false. Set AUTO_UPLOAD=true in .env to enable publishing.")
+        return
+
+    privacy = "public" if settings.auto_publish else "private"
+    if not settings.auto_publish:
+        print("[info] AUTO_PUBLISH=false; videos will be uploaded as PRIVATE (not public).")
+
+    auth = YouTubeAuth()
+    if not auth.is_configured():
+        logger.error("YouTube OAuth not configured", extra={"stage": "upload", "status": "error"})
+        print("[error] YouTube OAuth not configured. Set YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN in .env.")
+        return
+
+    db = Database(settings.db_path)
+    try:
+        ready = db.fetchall("SELECT * FROM videos WHERE status='READY' AND youtube_video_id IS NULL")
+        if not ready:
+            print("[info] No READY videos pending upload.")
+            return
+
+        uploader = YouTubeUploader(auth)
+        for v in ready:
+            job_id = v["id"]
+            db.set_job_state(job_id, JobState.UPLOADING, stage="upload")
+            try:
+                result = uploader.upload(
+                    v["video_path"], v["title"], v["description"],
+                    v["title"].split(), privacy_status=privacy, job_id=str(job_id),
+                )
+                db.execute(
+                    "UPDATE videos SET youtube_video_id=?, status='PUBLISHED', published_at=datetime('now') WHERE id=?",
+                    (result.video_id, job_id),
+                )
+                db.set_job_state(job_id, JobState.PUBLISHED, stage="upload")
+                logger.info(f"published video {result.video_id}: {result.url}",
+                            extra={"job_id": str(job_id), "stage": "upload", "status": "published"})
+                print(f"[published] {result.url}")
+            except Exception as exc:
+                db.set_job_state(job_id, JobState.FAILED, stage="upload")
+                db.log_error("upload", str(exc), job_id=job_id)
+                logger.error(f"upload failed: {exc}",
+                             extra={"job_id": str(job_id), "stage": "upload", "status": "error"})
+                print(f"[failed] job {job_id}: {exc}")
+    finally:
+        db.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -130,7 +184,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[info] Topic received: {args.topic} (use --generate to produce a script)")
 
     if args.upload:
-        print("[info] Upload is reserved for Phase 10 (disabled by default).")
+        _handle_upload(settings)
+        return 0
     if args.analytics:
         print("[info] Analytics is reserved for Phase 11.")
     if args.status:
