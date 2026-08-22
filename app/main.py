@@ -16,6 +16,7 @@ from app.ai.gemini import GeminiProvider
 from app.content.script_generator import ScriptGenerator
 from app.youtube.auth import YouTubeAuth
 from app.youtube.uploader import YouTubeUploader
+from app.youtube.analytics import AnalyticsCollector, TopicOptimizer
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -159,6 +160,41 @@ def _handle_upload(settings) -> None:
         db.close()
 
 
+def _handle_analytics(settings) -> None:
+    """Collect analytics for published videos and print topic optimization."""
+    auth = YouTubeAuth()
+    if not auth.is_configured():
+        logger.error("YouTube OAuth not configured", extra={"stage": "analytics", "status": "error"})
+        print("[error] YouTube OAuth not configured. Set YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN in .env.")
+        return
+
+    db = Database(settings.db_path)
+    try:
+        collector = AnalyticsCollector(auth=auth, db=db)
+        metrics = collector.collect_all_published()
+        if not metrics:
+            print("[info] No published videos to collect analytics for.")
+        for m in metrics:
+            score = m.performance_score()
+            print(f"  {m.video_id}: views={m.views} likes={m.likes} "
+                  f"comments={m.comments} eng={m.engagement_rate:.3f} score={score}")
+
+        optimizer = TopicOptimizer(db)
+        perf = optimizer.compute_topic_performance()
+        if perf:
+            print("\n=== Topic performance (avg score) ===")
+            for topic, score in sorted(perf.items(), key=lambda x: x[1], reverse=True):
+                print(f"  {topic}: {score:.2f}")
+            adjustments = optimizer.recommend_weight_adjustments()
+            print("\n=== Suggested weight adjustments ===")
+            for topic, delta in adjustments.items():
+                print(f"  {topic}: {delta:+.3f}")
+        else:
+            print("[info] No analytics data yet; topic optimization needs published videos.")
+    finally:
+        db.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -187,7 +223,8 @@ def main(argv: list[str] | None = None) -> int:
         _handle_upload(settings)
         return 0
     if args.analytics:
-        print("[info] Analytics is reserved for Phase 11.")
+        _handle_analytics(settings)
+        return 0
     if args.status:
         _handle_status(settings)
 
