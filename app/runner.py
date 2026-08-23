@@ -222,6 +222,16 @@ class Pipeline:
             if asset is None:
                 # Fallback to an image query so the render step still has inputs.
                 asset = self.assets.get_or_fetch_image(scene.visual_query or "abstract", job_id=job_id)
+            if asset is None:
+                # Last resort: create a minimal placeholder asset record
+                # The VideoEditor will handle missing files gracefully
+                from app.media.asset_manager import AssetRecord
+                asset = AssetRecord(
+                    id=0, source="placeholder", source_url="", license="CC0",
+                    local_path="", type="image", duration=scene.end - scene.start,
+                    width=self.settings.video_width, height=self.settings.video_height,
+                    hash="placeholder"
+                )
             assets.append(asset)
         return assets
 

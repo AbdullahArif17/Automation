@@ -62,8 +62,9 @@ jobs:
 
       - name: Run generation (1 Short)
         env:
-          GEMINI_CI_BASE_DELAY: "15.0"
-          GEMINI_CI_MAX_DELAY: "90.0"
+          GEMINI_CI_BASE_DELAY: "30.0"
+          GEMINI_CI_MAX_DELAY: "120.0"
+          MIN_SCRIPT_QUALITY: "6.5"
         run: |
           python -m app.scheduler run-once
 

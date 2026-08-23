@@ -90,7 +90,12 @@ class VideoEditor:
 
         # Scene inputs
         for i, (scene, asset) in enumerate(zip(plan.scenes, scene_assets)):
-            input_args.extend(["-loop", "1", "-t", str(scene.end - scene.start), "-i", asset.local_path])
+            if asset.local_path and os.path.exists(asset.local_path):
+                input_args.extend(["-loop", "1", "-t", str(scene.end - scene.start), "-i", asset.local_path])
+            else:
+                # Fallback: generate solid color using ffmpeg color source
+                input_args.extend(["-f", "lavfi", "-t", str(scene.end - scene.start), "-i",
+                                 f"color=c=0x1a1a2e:size={VIDEO_WIDTH}x{VIDEO_HEIGHT}:rate={VIDEO_FPS}"])
             scene_inputs.append(len(input_args) // 2 - 1)  # input index
 
         # Voice input
