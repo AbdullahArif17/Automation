@@ -21,7 +21,7 @@ jobs:
       # All secrets injected from repository settings
       APP_ENV: production
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      GEMINI_MODEL: gemini-2.5-flash
+      GEMINI_MODEL: gemini-3.1-flash
       YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
       YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
       YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
@@ -30,6 +30,7 @@ jobs:
       AUTO_UPLOAD: "true"
       AUTO_PUBLISH: "true"
       MAX_DAILY_GENERATIONS: 2
+      MAX_REGENERATION_ATTEMPTS: 1
       MIN_SCRIPT_QUALITY: 7.5
       TTS_PROVIDER: local
       MEDIA_PROVIDER: free

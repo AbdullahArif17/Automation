@@ -31,7 +31,7 @@ class GeneratedScript:
 
 
 class ScriptGenerator:
-    def __init__(self, provider: LLMProvider, num_candidates: int = 3,
+    def __init__(self, provider: LLMProvider, num_candidates: int = 1,
                  max_attempts: Optional[int] = None):
         self.provider = provider
         self.settings = get_settings()

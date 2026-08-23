@@ -122,7 +122,8 @@ class Pipeline:
 
             # 2. Script
             self.db.set_job_state(job_id, JobState.SCRIPTING, stage="script")
-            gen = ScriptGenerator(self.provider, num_candidates=2, max_attempts=2)
+            # Reduced for free tier quota (5 RPM, 20 RPD)
+            gen = ScriptGenerator(self.provider, num_candidates=1, max_attempts=1)
             script = gen.generate(
                 scored.topic, summary=research.summary if research else "",
                 facts=research.facts if research else [], job_id=jid,
