@@ -58,8 +58,9 @@ class Settings:
 
     # LLM / AI
     gemini_api_key: str = field(default_factory=lambda: os.getenv("GEMINI_API_KEY", ""))
-    # gemini-3.1-flash: 15 RPM, 500 RPD free tier (much better than 2.5-flash: 5 RPM, 20 RPD)
-    gemini_model: str = field(default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-3.1-flash"))
+    # gemini-3.5-flash-lite: 15 RPM, 500 RPD free tier (best available in v1beta)
+    # gemini-2.5-flash-lite: 10 RPM, 20 RPD as fallback
+    gemini_model: str = field(default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"))
 
     # YouTube OAuth
     youtube_client_id: str = field(default_factory=lambda: os.getenv("YOUTUBE_CLIENT_ID", ""))
