@@ -135,8 +135,9 @@ Return ONLY JSON:
         return ts
 
     def select_best(self, candidates: list[TopicCandidate],
-                    job_id: Optional[str] = None) -> TopicScore | None:
-        """Run full pipeline (research -> verify -> score) for each candidate,
+                    job_id: Optional[str] = None,
+                    max_candidates: int = 3) -> TopicScore | None:
+        """Run full pipeline (research -> verify -> score) for top N candidates,
         return highest-scoring one that passes threshold."""
         from app.research.researcher import Researcher
         from app.research.verifier import FactVerifier
@@ -145,7 +146,8 @@ Return ONLY JSON:
         verifier = FactVerifier(self.provider)
 
         best: TopicScore | None = None
-        for c in candidates:
+        # Limit to max_candidates to reduce API calls (free tier quota)
+        for c in candidates[:max_candidates]:
             research = researcher.research(c.title, [c], job_id=job_id)
             verified = verifier.verify(research, job_id=job_id)
             scored = self.score(c, research, verified, job_id=job_id)

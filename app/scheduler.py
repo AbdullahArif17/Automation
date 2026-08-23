@@ -35,9 +35,10 @@ class DailyRunner:
         pipeline: Pipeline | None = None,
         posts_per_day: int | None = None,
         max_generations: int | None = None,
+        mock_llm: bool = False,
     ):
         settings = get_settings()
-        self.pipeline = pipeline or build_pipeline(mock_llm=False)
+        self.pipeline = pipeline or build_pipeline(mock_llm=mock_llm)
         self.posts_per_day = posts_per_day or settings.posts_per_day
         self.max_generations = max_generations or settings.max_daily_generations
         self.settings = settings
@@ -173,11 +174,19 @@ def uninstall_windows_task() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
-    parser = argparse.ArgumentParser(prog="scheduler", description="Daily automation runner")
+    parser = argparse.ArgumentParser(prog="scheduler", description="Daily automation runner", add_help=False)
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("run-once", help="Run one generation cycle")
+    # Helper to add mock-llm to a subparser
+    def add_mock_llm(p):
+        p.add_argument("--mock-llm", action="store_true",
+                       help="Use mock LLM provider (no API keys, no cost)")
+
+    run_once_parser = sub.add_parser("run-once", help="Run one generation cycle")
+    add_mock_llm(run_once_parser)
+
     loop_parser = sub.add_parser("run-loop", help="Run blocking loop (local/container)")
+    add_mock_llm(loop_parser)
     loop_parser.add_argument("--interval", type=int, default=3600,
                              help="Seconds between runs (default 3600)")
 
@@ -188,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
 
-    runner = DailyRunner()
+    runner = DailyRunner(mock_llm=getattr(args, "mock_llm", False))
 
     if args.cmd == "run-once":
         topic = runner.run_once()

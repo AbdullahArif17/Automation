@@ -11,6 +11,8 @@ than silently using a paid service. The system never auto-upgrades to paid.
 from __future__ import annotations
 
 import json
+import os
+import time
 import urllib.request
 import urllib.error
 from typing import Any
@@ -24,6 +26,10 @@ logger = get_logger(__name__)
 
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
+# CI environment: use longer delays to respect 15 RPM free tier
+CI_BASE_DELAY = float(os.getenv("GEMINI_CI_BASE_DELAY", "10.0"))  # seconds
+CI_MAX_DELAY = float(os.getenv("GEMINI_CI_MAX_DELAY", "60.0"))
+
 
 class GeminiProvider(LLMProvider):
     def __init__(self, model: str | None = None, api_key: str | None = None):
@@ -33,6 +39,7 @@ class GeminiProvider(LLMProvider):
         if not self.api_key:
             # Fail loud, never silently fall back to anything paid.
             raise RuntimeError("GEMINI_API_KEY is not set; cannot use Gemini provider")
+        self._in_ci = os.getenv("CI") == "true" or os.getenv("GITHUB_ACTIONS") == "true"
 
     def _post(self, prompt: str, temperature: float) -> str:
         url = f"{BASE_URL}/{self.model}:generateContent?key={self.api_key}"
@@ -49,8 +56,13 @@ class GeminiProvider(LLMProvider):
                 payload = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "ignore")[:300]
-            logger.error(f"Gemini HTTP {exc.code}: {detail}",
-                         extra={"stage": "gemini", "status": "error", "error": detail})
+            # Check for quota exceeded (429)
+            if exc.code == 429:
+                logger.warning(f"Gemini quota exceeded (429), will retry",
+                             extra={"stage": "gemini", "status": "retry", "error": detail})
+            else:
+                logger.error(f"Gemini HTTP {exc.code}: {detail}",
+                             extra={"stage": "gemini", "status": "error", "error": detail})
             raise
         candidates = payload.get("candidates") or []
         if not candidates:
@@ -61,6 +73,36 @@ class GeminiProvider(LLMProvider):
         return parts[0]["text"]
 
     def generate(self, prompt: str, temperature: float = 0.7) -> str:
-        # Retry only transient errors (429, 5xx). Invalid prompts are not retried.
+        # Retry with exponential backoff. In CI, use much longer base delay.
+        if self._in_ci:
+            return self._generate_with_ci_backoff(prompt, temperature)
+        # Normal: retry only transient errors (429, 5xx)
         return retry(self._post, prompt, temperature, max_attempts=3,
-                     retry_on=(urllib.error.URLError, TimeoutError))
+                     retry_on=(urllib.error.URLError, TimeoutError, urllib.error.HTTPError))
+
+    def _generate_with_ci_backoff(self, prompt: str, temperature: float) -> str:
+        """Generate with CI-friendly exponential backoff (longer delays)."""
+        max_attempts = 3
+        base_delay = CI_BASE_DELAY
+        max_delay = CI_MAX_DELAY
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                return self._post(prompt, temperature)
+            except urllib.error.HTTPError as exc:
+                if exc.code in (429, 500, 502, 503, 504) and attempt < max_attempts:
+                    delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
+                    logger.warning(f"Gemini HTTP {exc.code}, retrying in {delay:.1f}s (attempt {attempt}/{max_attempts})",
+                                 extra={"stage": "gemini", "status": "retry", "attempt": attempt})
+                    time.sleep(delay)
+                    continue
+                raise
+            except (urllib.error.URLError, TimeoutError) as exc:
+                if attempt < max_attempts:
+                    delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
+                    logger.warning(f"Gemini network error: {exc}, retrying in {delay:.1f}s",
+                                 extra={"stage": "gemini", "status": "retry", "attempt": attempt})
+                    time.sleep(delay)
+                    continue
+                raise

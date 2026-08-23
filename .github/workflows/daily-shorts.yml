@@ -60,6 +60,9 @@ jobs:
           mkdir -p data output assets
 
       - name: Run generation (1 Short)
+        env:
+          GEMINI_CI_BASE_DELAY: "15.0"
+          GEMINI_CI_MAX_DELAY: "90.0"
         run: |
           python -m app.scheduler run-once
 
@@ -96,5 +99,8 @@ jobs:
       - run: pip install -e .
       - run: mkdir -p data
       - name: Collect analytics
+        env:
+          GEMINI_CI_BASE_DELAY: "15.0"
+          GEMINI_CI_MAX_DELAY: "90.0"
         run: |
           python -m app.main --analytics
