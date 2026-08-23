@@ -93,7 +93,7 @@ class YouTubeAuth:
         return YouTubeCredentials(access_token=self.get_access_token())
 
     @staticmethod
-    def build_auth_url(client_id: str, redirect_uri: str = "urn:ietf:wg:oauth:2.0:oob") -> str:
+    def build_auth_url(client_id: str, redirect_uri: str = "http://localhost") -> str:
         """Build the consent URL for the one-time interactive OAuth flow."""
         from urllib.parse import urlencode
         params = {
@@ -108,7 +108,7 @@ class YouTubeAuth:
 
     @staticmethod
     def exchange_code_for_tokens(client_id: str, client_secret: str, code: str,
-                                  redirect_uri: str = "urn:ietf:wg:oauth:2.0:oob") -> dict:
+                                  redirect_uri: str = "http://localhost") -> dict:
         """Exchange authorization code for tokens (one-time setup step)."""
         from urllib.parse import urlencode
         body = urlencode({
