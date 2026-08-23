@@ -9,8 +9,18 @@ from app.youtube.uploader import YouTubeUploader, UploadResult
 
 
 def test_auth_not_configured():
-    auth = YouTubeAuth(client_id="", client_secret="", refresh_token="")
-    assert not auth.is_configured()
+    # Patch settings to return empty values so auth is truly unconfigured
+    import app.config.settings as s
+    original = (s.get_settings().youtube_client_id, s.get_settings().youtube_client_secret, s.get_settings().youtube_refresh_token)
+    try:
+        s._settings = None
+        s.get_settings().youtube_client_id = ""
+        s.get_settings().youtube_client_secret = ""
+        s.get_settings().youtube_refresh_token = ""
+        auth = YouTubeAuth(client_id=None, client_secret=None, refresh_token=None)
+        assert not auth.is_configured()
+    finally:
+        s._settings = None
 
 
 def test_credentials_auth_header():
@@ -46,15 +56,23 @@ def test_get_access_token_success():
 
 
 def test_get_access_token_not_configured():
-    auth = YouTubeAuth(client_id="", client_secret="", refresh_token="")
-    with pytest.raises(RuntimeError):
-        auth.get_access_token()
+    with patch("app.youtube.auth.get_settings") as mock_settings:
+        mock_settings.return_value.youtube_client_id = ""
+        mock_settings.return_value.youtube_client_secret = ""
+        mock_settings.return_value.youtube_refresh_token = ""
+        auth = YouTubeAuth()
+        with pytest.raises(RuntimeError):
+            auth.get_access_token()
 
 
 def test_uploader_requires_auth():
-    uploader = YouTubeUploader(auth=YouTubeAuth("", "", ""))
-    with pytest.raises(RuntimeError):
-        uploader.upload("fake.mp4", "title", "desc", ["tag"])
+    with patch("app.youtube.auth.get_settings") as mock_settings:
+        mock_settings.return_value.youtube_client_id = ""
+        mock_settings.return_value.youtube_client_secret = ""
+        mock_settings.return_value.youtube_refresh_token = ""
+        uploader = YouTubeUploader(auth=YouTubeAuth())
+        with pytest.raises(RuntimeError):
+            uploader.upload("fake.mp4", "title", "desc", ["tag"])
 
 
 def test_upload_result():

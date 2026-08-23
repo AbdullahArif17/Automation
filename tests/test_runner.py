@@ -254,5 +254,8 @@ def test_build_pipeline_mock_llm():
 def test_build_pipeline_real_llm_requires_key(monkeypatch):
     """build_pipeline() without mock raises if no GEMINI_API_KEY."""
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    # Reset cached settings
+    import app.config.settings
+    app.config.settings._settings = None
     with pytest.raises(RuntimeError):
         build_pipeline(mock_llm=False)
