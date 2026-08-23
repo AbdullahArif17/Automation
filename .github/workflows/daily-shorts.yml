@@ -26,10 +26,11 @@ jobs:
       YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
       YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
       CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
-      POSTS_PER_DAY: 1
+      POSTS_PER_DAY: 2
       AUTO_UPLOAD: "true"
-      AUTO_PUBLISH: "true"      # set to "false" for private drafts
-      MAX_DAILY_GENERATIONS: 1
+      AUTO_PUBLISH: "true"
+      MAX_DAILY_GENERATIONS: 2
+      MIN_SCRIPT_QUALITY: 7.5
       TTS_PROVIDER: local
       MEDIA_PROVIDER: free
       DATABASE_URL: sqlite:///data/app.db
