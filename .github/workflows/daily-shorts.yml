@@ -31,17 +31,17 @@ jobs:
       AUTO_PUBLISH: "true"
       MAX_DAILY_GENERATIONS: 2
       MAX_REGENERATION_ATTEMPTS: 1
-      MIN_SCRIPT_QUALITY: 7.5
+      MIN_SCRIPT_QUALITY: 6.5
       TTS_PROVIDER: local
       MEDIA_PROVIDER: free
       DATABASE_URL: sqlite:///data/app.db
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.4.0
         with:
           python-version: "3.13"
           cache: "pip"
@@ -70,7 +70,7 @@ jobs:
 
       - name: Upload artifacts (logs, video)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.4.3
         with:
           name: shorts-output-${{ github.run_id }}
           path: |
@@ -93,8 +93,8 @@ jobs:
       DATABASE_URL: sqlite:///data/app.db
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-python@v5.4.0
         with:
           python-version: "3.13"
           cache: "pip"
@@ -102,7 +102,7 @@ jobs:
       - run: mkdir -p data
       - name: Collect analytics
         env:
-          GEMINI_CI_BASE_DELAY: "15.0"
-          GEMINI_CI_MAX_DELAY: "90.0"
+          GEMINI_CI_BASE_DELAY: "30.0"
+          GEMINI_CI_MAX_DELAY: "120.0"
         run: |
           python -m app.main --analytics
