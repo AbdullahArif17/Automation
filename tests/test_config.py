@@ -16,6 +16,8 @@ def test_settings_defaults():
         data_dir=Path("/tmp/yt_test_data"),
         output_dir=Path("/tmp/yt_test_out"),
         assets_dir=Path("/tmp/yt_test_assets"),
+        auto_upload=False,
+        auto_publish=False,
     )
     assert s.video_width == 1080
     assert s.video_height == 1920
