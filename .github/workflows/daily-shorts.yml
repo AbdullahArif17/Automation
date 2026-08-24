@@ -10,8 +10,13 @@ on:
     - cron: "0 18 * * *"  # 18:00 UTC
   workflow_dispatch:       # manual trigger
 
+concurrency:
+  group: shorts-generate
+  cancel-in-progress: false
+
 permissions:
   contents: read
+  actions: read
 
 jobs:
   generate:
@@ -59,6 +64,24 @@ jobs:
       - name: Create data/output dirs
         run: |
           mkdir -p data output assets
+
+      - name: Restore previous database
+        uses: actions/download-artifact@v4
+        with:
+          pattern: shorts-output-*
+          merge-multiple: true
+          path: /tmp/prev-artifact
+        continue-on-error: true
+
+      - name: Restore app.db from artifact
+        run: |
+          if [ -f /tmp/prev-artifact/data/app.db ]; then
+            cp /tmp/prev-artifact/data/app.db data/app.db
+            echo "Restored data/app.db from previous run"
+          else
+            echo "No previous database found, starting fresh"
+          fi
+          rm -rf /tmp/prev-artifact
 
       - name: Run generation (1 Short)
         env:

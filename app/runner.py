@@ -129,9 +129,11 @@ class Pipeline:
                 facts=research.facts if research else [], job_id=jid,
             )
             if script is None or not script.evaluation or not script.evaluation.passed:
-                self.db.set_job_state(job_id, JobState.REGENERATE, stage="script")
-            else:
-                self.db.set_job_state(job_id, JobState.SCRIPT_APPROVED, stage="script")
+                self.db.set_job_state(job_id, JobState.FAILED, stage="script")
+                raise RuntimeError(
+                    f"script failed quality check (score={script.score if script else 0})"  # noqa: E501
+                )
+            self.db.set_job_state(job_id, JobState.SCRIPT_APPROVED, stage="script")
 
             # 3. Visual plan
             planner = VisualPlanner(self.provider)
@@ -261,7 +263,7 @@ class Pipeline:
             )
             self.db.execute(
                 "UPDATE videos SET youtube_video_id=?, status=?, published_at=? WHERE id=?",
-                (result.video_id, JobState.PUBLISHED.value, "datetime('now')", video_id),
+                (result.video_id, JobState.PUBLISHED.value, _now(), video_id),
             )
             self.db.set_job_state(job_id, JobState.PUBLISHED, stage="upload")
             logger.info(f"published {result.video_id}",
