@@ -66,11 +66,13 @@ jobs:
           mkdir -p data output assets
 
       - name: Restore previous database
-        uses: actions/download-artifact@v4
+        uses: dawidd6/action-download-artifact@v6
         with:
-          pattern: shorts-output-*
-          merge-multiple: true
+          workflow: daily-shorts.yml
+          branch: ${{ github.ref_name }}
+          name: shorts-output-.*
           path: /tmp/prev-artifact
+          if_no_artifact_found: warn
         continue-on-error: true
 
       - name: Restore app.db from artifact
