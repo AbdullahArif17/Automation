@@ -160,18 +160,37 @@ def _handle_upload(settings) -> None:
         db.close()
 
 
-def _handle_analytics(settings) -> None:
-    """Collect analytics for published videos and print topic optimization."""
+def _handle_analytics(settings) -> int:
+    """Collect analytics for published videos and print topic optimization.
+
+    Returns an exit code: 0 success, 1 collection failure (so the scheduled
+    analytics job fails loud instead of silently degrading topic ranking),
+    2 configuration error.
+    """
     auth = YouTubeAuth()
     if not auth.is_configured():
         logger.error("YouTube OAuth not configured", extra={"stage": "analytics", "status": "error"})
         print("[error] YouTube OAuth not configured. Set YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN in .env.")
-        return
+        return 2
 
     db = Database(settings.db_path)
     try:
         collector = AnalyticsCollector(auth=auth, db=db)
-        metrics = collector.collect_all_published()
+        published = db.fetchone("SELECT COUNT(*) as c FROM videos WHERE youtube_video_id IS NOT NULL")
+        published_count = published["c"] if published else 0
+        try:
+            metrics = collector.collect_all_published()
+        except Exception as exc:
+            logger.error(f"analytics collection failed: {exc}",
+                         extra={"stage": "analytics", "status": "error"})
+            print(f"[error] analytics collection failed: {exc}")
+            return 1
+        if not metrics and published_count > 0:
+            logger.error("analytics: 0 metrics collected but published videos exist",
+                         extra={"stage": "analytics", "status": "error"})
+            print("[error] analytics collection returned nothing for existing published videos.")
+            return 1
+
         if not metrics:
             print("[info] No published videos to collect analytics for.")
         for m in metrics:
@@ -193,6 +212,7 @@ def _handle_analytics(settings) -> None:
             print("[info] No analytics data yet; topic optimization needs published videos.")
     finally:
         db.close()
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -223,8 +243,7 @@ def main(argv: list[str] | None = None) -> int:
         _handle_upload(settings)
         return 0
     if args.analytics:
-        _handle_analytics(settings)
-        return 0
+        return _handle_analytics(settings)
     if args.status:
         _handle_status(settings)
 

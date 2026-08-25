@@ -15,8 +15,9 @@ import platform
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from enum import Enum
 from typing import Optional
 
 from app.config.settings import get_settings
@@ -25,6 +26,14 @@ from app.storage.database import Database, JobState
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+class RunStatus(str, Enum):
+    """Outcome of a single run_once() cycle, used by the CLI for exit codes."""
+    OK = "OK"                         # generated (and uploaded, if enabled)
+    NOOP_LIMIT = "NOOP_LIMIT"         # daily limit reached; nothing to do
+    NOOP_NO_TOPIC = "NOOP_NO_TOPIC"   # no candidate topic available
+    FAILED = "FAILED"                 # generation or upload failed
 
 
 class DailyRunner:
@@ -42,6 +51,7 @@ class DailyRunner:
         self.posts_per_day = posts_per_day or settings.posts_per_day
         self.max_generations = max_generations or settings.max_daily_generations
         self.settings = settings
+        self.last_run: RunStatus = RunStatus.OK
 
     def _topics_today(self) -> int:
         """Count successful generations today."""
@@ -88,15 +98,145 @@ class DailyRunner:
             return scored.topic
         return candidates[0].title if candidates else None
 
+    def _recover_ready_videos(self) -> list[str]:
+        """Upload READY videos that never received a youtube_video_id.
+
+        Orphan recovery for the daily-scheduler path: `run_once` always starts
+        a NEW topic, so a video that finished rendering but failed upload in a
+        prior run (or whose upload succeeded at YouTube but was interrupted
+        before the DB row was updated) would otherwise sit un-uploaded forever,
+        since nothing in the run-once flow ever re-sweeps it.
+
+        Also promotes any stuck UPLOADING row (NULL youtube_video_id) back to
+        READY so it can be retried. Runs only when auto_upload is enabled.
+        """
+        if not self.settings.auto_upload:
+            return []
+        db = self.pipeline.db
+
+        # Promote stuck UPLOADING rows back to READY for a clean retry.
+        stuck = db.fetchall(
+            "SELECT id FROM videos WHERE status='UPLOADING' AND youtube_video_id IS NULL"
+        )
+        for row in stuck:
+            db.execute("UPDATE videos SET status=? WHERE id=?",
+                       (JobState.READY.value, row["id"]))
+            logger.warning(f"recovered stuck UPLOADING video #{row['id']} -> READY",
+                           extra={"video_id": row["id"], "stage": "scheduler",
+                                  "status": "recovered"})
+
+        orphans = db.fetchall(
+            "SELECT id, title, description, video_path FROM videos "
+            "WHERE status='READY' AND youtube_video_id IS NULL"
+        )
+        recovered: list[str] = []
+        for row in orphans:
+            vid_id = row["id"]
+            video_path = row["video_path"]
+            if not video_path or not Path(video_path).exists():
+                # Local file gone (e.g. artifact retention expired): cannot
+                # re-upload, mark FAILED so it stops being swept.
+                db.execute("UPDATE videos SET status=? WHERE id=?",
+                           (JobState.FAILED.value, vid_id))
+                logger.error(f"orphan video #{vid_id} missing local file; marked FAILED",
+                             extra={"video_id": vid_id, "stage": "scheduler",
+                                    "status": "error"})
+                continue
+            job = db.fetchone(
+                "SELECT id FROM publishing_jobs WHERE video_id=? ORDER BY id DESC LIMIT 1",
+                (vid_id,),
+            )
+            job_id = job["id"] if job else None
+            published, yt_id = self.pipeline._maybe_upload(
+                vid_id, job_id, row["title"] or "Untitled",
+                row["description"] or "", video_path,
+            )
+            if published:
+                recovered.append(yt_id or f"video #{vid_id}")
+                logger.info(f"recovered orphan video #{vid_id} -> {yt_id}",
+                            extra={"video_id": vid_id, "stage": "scheduler",
+                                   "status": "recovered_published"})
+            else:
+                logger.error(f"failed to recover orphan video #{vid_id}",
+                             extra={"video_id": vid_id, "stage": "scheduler",
+                                    "status": "error"})
+        return recovered
+
+    def _recover_stuck_jobs(self, threshold_minutes: int | None = None) -> int:
+        """Mark non-terminal jobs untouched for N minutes as FAILED.
+
+        If the process was killed mid-step (step timeout, OOM, SIGKILL) the last
+        JobState was persisted but the work never finished. Without this, dead
+        rows accumulate forever and are never retried. A job not touched in
+        `threshold_minutes` (default 30, env STUCK_JOB_MINUTES) is genuinely
+        stuck — run-once itself finishes in well under that.
+        """
+        threshold = threshold_minutes or int(os.getenv("STUCK_JOB_MINUTES", "30"))
+        db = self.pipeline.db
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=threshold)).isoformat()
+        terminal = {JobState.PUBLISHED.value, JobState.FAILED.value}
+        non_terminal = [s.value for s in JobState if s.value not in terminal]
+        placeholders = ",".join("?" * len(non_terminal))
+        stuck = db.fetchall(
+            f"SELECT id, state FROM publishing_jobs "
+            f"WHERE state IN ({placeholders}) AND updated_at < ?",
+            (*non_terminal, cutoff),
+        )
+        for row in stuck:
+            db.set_job_state(row["id"], JobState.FAILED, stage="recovery")
+            logger.warning(
+                f"marked stuck job #{row['id']} ({row['state']}) as FAILED",
+                extra={"job_id": row["id"], "stage": "scheduler", "status": "recovered_stuck"},
+            )
+        if stuck:
+            logger.warning(f"recovered {len(stuck)} stuck job(s)",
+                           extra={"stage": "scheduler", "status": "recovered_stuck"})
+        return len(stuck)
+
+    def _verify_production(self, outcome) -> bool:
+        """Guard against a 'successful' run that produced no real artifact.
+
+        A RunOutcome counts as truly successful only if a non-empty video file
+        exists on disk, and — when uploading is enabled — it was published with
+        a real YouTube id. Catches the silent 'produced nothing' case (audit §4).
+        """
+        if outcome.render is None or not outcome.render.output_path:
+            logger.error("run reported success but produced no render result",
+                         extra={"stage": "scheduler", "status": "error"})
+            return False
+        path = Path(outcome.render.output_path)
+        if not path.exists() or path.stat().st_size == 0:
+            logger.error(f"run reported success but no video file at {path}",
+                         extra={"stage": "scheduler", "status": "error"})
+            return False
+        if self.settings.auto_upload and not outcome.youtube_video_id:
+            logger.error("run reported success but no youtube_video_id set",
+                         extra={"stage": "scheduler", "status": "error"})
+            return False
+        return True
+
     def run_once(self) -> Optional[str]:
-        """Run one generation cycle. Returns topic or None."""
+        """Run one generation cycle. Returns the topic on success, else None.
+
+        The richer outcome is recorded on `self.last_run` (RunStatus) so the CLI
+        can tell a normal no-op (limit reached / no topic) from a real failure —
+        both return None, but only FAILED should exit non-zero.
+        """
+        self.last_run = RunStatus.OK
+        # Recover jobs killed mid-step and videos orphaned by prior runs before
+        # generating a new topic, so failures are never silently dropped.
+        self._recover_stuck_jobs()
+        self._recover_ready_videos()
+
         if not self._needs_generation():
             logger.info("daily limit reached", extra={"stage": "scheduler", "status": "limit"})
+            self.last_run = RunStatus.NOOP_LIMIT
             return None
 
         topic = self._pick_topic()
         if not topic:
             logger.warning("no topic available", extra={"stage": "scheduler", "status": "no_topic"})
+            self.last_run = RunStatus.NOOP_NO_TOPIC
             return None
 
         logger.info(f"scheduler: generating '{topic}'",
@@ -106,10 +246,16 @@ class DailyRunner:
         if outcome.error or (self.settings.auto_upload and not outcome.published):
             logger.error(f"generation failed: {outcome.error or 'upload did not complete'}",
                          extra={"stage": "scheduler", "status": "error"})
+            self.last_run = RunStatus.FAILED
             return None
-        else:
-            logger.info(f"generated '{topic}' -> {outcome.video_id}",
-                        extra={"stage": "scheduler", "status": "done"})
+
+        if not self._verify_production(outcome):
+            self.last_run = RunStatus.FAILED
+            return None
+
+        logger.info(f"generated '{topic}' -> {outcome.video_id}",
+                    extra={"stage": "scheduler", "status": "done"})
+        self.last_run = RunStatus.OK
         return topic
 
     def run_loop(self, interval_seconds: int = 3600) -> None:
@@ -202,7 +348,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "run-once":
         topic = runner.run_once()
-        return 0 if topic else 1
+        # NOOP_LIMIT / NOOP_NO_TOPIC / OK are normal; only FAILED exits non-zero.
+        return 1 if runner.last_run == RunStatus.FAILED else 0
 
     if args.cmd == "run-loop":
         runner.run_loop(interval_seconds=args.interval)

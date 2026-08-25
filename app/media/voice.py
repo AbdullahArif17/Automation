@@ -202,7 +202,7 @@ def get_voice_provider(preferred: str = "auto") -> VoiceProvider:
     preferred: "piper" | "espeak" | "mock" | "auto"
     auto tries Piper -> espeak -> mock.
     """
-    if preferred in ("piper", "auto"):
+    if preferred in ("piper", "auto", "local"):
         p = PiperVoiceProvider()
         if p.is_available():
             logger.info("using Piper TTS", extra={"stage": "voice", "status": "piper"})
@@ -210,7 +210,7 @@ def get_voice_provider(preferred: str = "auto") -> VoiceProvider:
         if preferred == "piper":
             raise RuntimeError("Piper requested but not available")
 
-    if preferred in ("espeak", "auto"):
+    if preferred in ("espeak", "auto", "local"):
         e = EspeakVoiceProvider()
         if e.is_available():
             logger.info("using espeak-ng TTS", extra={"stage": "voice", "status": "espeak"})

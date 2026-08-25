@@ -27,8 +27,11 @@ logger = get_logger(__name__)
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
 # CI environment: use longer delays to respect 15 RPM free tier
-CI_BASE_DELAY = float(os.getenv("GEMINI_CI_BASE_DELAY", "10.0"))  # seconds
+CI_BASE_DELAY = float(os.getenv("GEMINI_CI_BASE_DELAY", "20.0"))  # seconds
 CI_MAX_DELAY = float(os.getenv("GEMINI_CI_MAX_DELAY", "60.0"))
+# Per-request timeout; shortened in CI (GEMINI_TIMEOUT) so a systematic outage
+# fails fast instead of pushing a run past the 15-min step timeout (audit R6).
+REQUEST_TIMEOUT = float(os.getenv("GEMINI_TIMEOUT", "60"))
 
 
 class GeminiProvider(LLMProvider):
@@ -52,7 +55,7 @@ class GeminiProvider(LLMProvider):
             url, data=data, headers={"Content-Type": "application/json"}
         )
         try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
+            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "ignore")[:300]
@@ -82,7 +85,7 @@ class GeminiProvider(LLMProvider):
 
     def _generate_with_ci_backoff(self, prompt: str, temperature: float) -> str:
         """Generate with CI-friendly exponential backoff (longer delays)."""
-        max_attempts = 3
+        max_attempts = 2
         base_delay = CI_BASE_DELAY
         max_delay = CI_MAX_DELAY
         attempt = 0
