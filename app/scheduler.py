@@ -106,6 +106,7 @@ class DailyRunner:
         if outcome.error:
             logger.error(f"generation failed: {outcome.error}",
                          extra={"stage": "scheduler", "status": "error"})
+            return None
         else:
             logger.info(f"generated '{topic}' -> {outcome.video_id}",
                         extra={"stage": "scheduler", "status": "done"})
