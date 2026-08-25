@@ -174,7 +174,15 @@ class DailyRunner:
         threshold = threshold_minutes or int(os.getenv("STUCK_JOB_MINUTES", "30"))
         db = self.pipeline.db
         cutoff = (datetime.now(timezone.utc) - timedelta(minutes=threshold)).isoformat()
+        # READY is terminal only when uploads are disabled: with AUTO_UPLOAD off,
+        # a finished video is deliberately left at READY (Pipeline._maybe_upload
+        # returns early and never moves it past), so it must not be swept as
+        # "stuck". With uploads enabled a READY job should advance quickly, so it
+        # stays in the sweep. All other non-terminal states (CREATED,
+        # RESEARCHING, ..., UPLOADING) are always swept past the threshold.
         terminal = {JobState.PUBLISHED.value, JobState.FAILED.value}
+        if not self.settings.auto_upload:
+            terminal.add(JobState.READY.value)
         non_terminal = [s.value for s in JobState if s.value not in terminal]
         placeholders = ",".join("?" * len(non_terminal))
         stuck = db.fetchall(
