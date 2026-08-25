@@ -41,8 +41,8 @@ class TopicCandidate:
 FEEDS: list[dict] = [
     {
         "name": "google_ai_blog",
-        "url": "https://ai.googleblog.com/feeds/posts/default?alt=rss",
-        "parser": "parse_google_ai",
+        "url": "https://research.google/blog/rss",
+        "parser": "parse_generic_rss",
     },
     {
         "name": "openai_blog",
@@ -51,7 +51,7 @@ FEEDS: list[dict] = [
     },
     {
         "name": "anthropic_news",
-        "url": "https://www.anthropic.com/news/rss.xml",
+        "url": "https://tim-hilde.github.io/anthropic-rss/rss.xml",
         "parser": "parse_generic_rss",
     },
     {
@@ -151,6 +151,7 @@ def parse_arxiv(xml: str, source: str) -> list[TopicCandidate]:
 def discover_candidates(max_per_source: int = 5) -> list[TopicCandidate]:
     """Fetch all configured feeds, return deduplicated candidates."""
     all_cands: list[TopicCandidate] = []
+    failed_count = 0
     for feed in FEEDS:
         try:
             xml = _fetch(feed["url"])
@@ -160,8 +161,15 @@ def discover_candidates(max_per_source: int = 5) -> list[TopicCandidate]:
             logger.info(f"source {feed['name']}: {len(cands)} items",
                         extra={"stage": "discover", "status": "ok"})
         except Exception as exc:
+            failed_count += 1
             logger.warning(f"source {feed['name']} failed: {exc}",
                            extra={"stage": "discover", "status": "error", "error": str(exc)})
+    # All-feeds-failed warning: distinct from "feeds worked but nothing new"
+    if failed_count == len(FEEDS) and len(FEEDS) > 0:
+        logger.warning(
+            f"all {len(FEEDS)} research feeds failed — check for dead/moved URLs",
+            extra={"stage": "discover", "status": "all_failed", "error": "all_feeds_failed"},
+        )
     # Deduplicate by URL
     seen = set()
     unique = []

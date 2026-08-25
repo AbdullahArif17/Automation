@@ -118,3 +118,54 @@ def test_duplicate_penalty_exact():
 #     cands = discover_candidates(max_per_source=2)
 #     assert isinstance(cands, list)
 #     assert all(isinstance(c, TopicCandidate) for c in cands)
+
+
+# --- feed URL and all-feeds-failed warning tests -----------------------------
+
+def test_feed_urls_updated():
+    """Verify the dead feed URLs have been replaced with working ones."""
+    from app.research.sources import FEEDS
+    feed_names = {f["name"] for f in FEEDS}
+    assert "google_ai_blog" in feed_names
+    assert "anthropic_news" in feed_names
+    # google_ai_blog should now use research.google/blog/rss with generic parser
+    google_feed = next(f for f in FEEDS if f["name"] == "google_ai_blog")
+    assert google_feed["url"] == "https://research.google/blog/rss"
+    assert google_feed["parser"] == "parse_generic_rss"
+    # anthropic_news should use the community mirror
+    anthropic_feed = next(f for f in FEEDS if f["name"] == "anthropic_news")
+    assert anthropic_feed["url"] == "https://tim-hilde.github.io/anthropic-rss/rss.xml"
+    assert anthropic_feed["parser"] == "parse_generic_rss"
+
+
+def test_all_feeds_failed_warning(caplog):
+    """When every feed fails, a distinct WARNING is logged."""
+    import logging
+    from app.research.sources import discover_candidates, FEEDS
+    from unittest.mock import patch
+
+    caplog.set_level(logging.WARNING, logger="app.research.sources")
+
+    # Mock _fetch to always raise (simulating all feeds down)
+    with patch("app.research.sources._fetch", side_effect=Exception("404 Not Found")):
+        result = discover_candidates(max_per_source=2)
+    # Should return empty list (no candidates)
+    assert result == []
+    # Should have logged the all-feeds-failed warning
+    all_failed_logs = [r for r in caplog.records
+                       if "all" in r.message.lower() and "feeds failed" in r.message.lower()]
+    assert len(all_failed_logs) == 1
+    assert "all" in all_failed_logs[0].message
+    assert str(len(FEEDS)) in all_failed_logs[0].message
+    # Partial failures should NOT trigger this warning - they log per-source
+    caplog.clear()
+    with patch("app.research.sources._fetch") as mock_fetch:
+        # First feed succeeds, second fails
+        mock_fetch.side_effect = [
+            '<rss><channel><item><title>OK</title><link>http://ok</link></item></channel></rss>',
+            Exception("404 Not Found"),
+        ]
+        discover_candidates(max_per_source=2)
+    partial_all_failed = [r for r in caplog.records
+                          if "all" in r.message.lower() and "feeds failed" in r.message.lower()]
+    assert len(partial_all_failed) == 0
