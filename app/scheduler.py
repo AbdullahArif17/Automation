@@ -103,8 +103,8 @@ class DailyRunner:
                     extra={"stage": "scheduler", "status": "generating"})
         outcome = self.pipeline.run_topic(topic, upload=self.settings.auto_upload)
 
-        if outcome.error:
-            logger.error(f"generation failed: {outcome.error}",
+        if outcome.error or (self.settings.auto_upload and not outcome.published):
+            logger.error(f"generation failed: {outcome.error or 'upload did not complete'}",
                          extra={"stage": "scheduler", "status": "error"})
             return None
         else:
