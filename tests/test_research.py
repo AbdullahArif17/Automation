@@ -27,6 +27,40 @@ def test_parse_generic_rss():
     assert items[0].url == "http://u"
 
 
+def test_parse_generic_rss_strips_html():
+    """parse_generic_rss strips HTML tags, removes <style>/<script> content,
+    collapses whitespace, and truncates to MAX_DESC_LENGTH (500)."""
+    from app.research.sources import MAX_DESC_LENGTH
+    xml = """<rss><channel><item><title>HTML Topic</title><link>http://u</link>
+<description><![CDATA[<p>Plain text with <strong>bold</strong> and <em>italic</em>.</p>
+<style>body { color: red; font-size: 12px; }</style>
+<script>console.log("evil");</script>
+<p>More text after scripts.</p>]]></description>
+<pubDate>Mon, 01 Jan 2026 00:00:00 GMT</pubDate></item></channel></rss>"""
+    items = parse_generic_rss(xml, "test")
+    assert len(items) == 1
+    desc = items[0].summary
+    # HTML tags removed
+    assert "<p>" not in desc
+    assert "<strong>" not in desc
+    assert "<em>" not in desc
+    # style/script content entirely removed
+    assert "color: red" not in desc
+    assert "console.log" not in desc
+    # Only readable text remains, whitespace collapsed
+    assert "Plain text with bold and italic." in desc
+    assert "More text after scripts." in desc
+    # Length cap
+    assert len(desc) <= MAX_DESC_LENGTH
+
+    # Plain text description passes through unchanged
+    xml_plain = """<rss><channel><item><title>Plain</title><link>http://u</link>
+<description>Simple summary without HTML.</description>
+<pubDate>Mon, 01 Jan 2026 00:00:00 GMT</pubDate></item></channel></rss>"""
+    items2 = parse_generic_rss(xml_plain, "test")
+    assert items2[0].summary == "Simple summary without HTML."
+
+
 def test_researcher_mock():
     p = MockProvider([json.dumps({
         "summary": "AI is advancing.",

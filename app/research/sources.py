@@ -6,15 +6,56 @@ Each source returns a list of candidate topics with minimal metadata.
 from __future__ import annotations
 
 import json
+import re
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from typing import Any
 
 from app.utils.logging import get_logger
 from app.utils.retry import retry
 
 logger = get_logger(__name__)
+
+# Max length for a topic summary/description (stripped from RSS <description>).
+MAX_DESC_LENGTH = 500
+
+
+class _HTMLStripper(HTMLParser):
+    """Minimal HTML stripper: removes tags, discards <style>/<script> content entirely."""
+
+    def __init__(self):
+        super().__init__()
+        self._text_parts: list[str] = []
+        self._discard = False  # True while inside <style> or <script>
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag in ("style", "script"):
+            self._discard = True
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("style", "script"):
+            self._discard = False
+
+    def handle_data(self, data: str) -> None:
+        if not self._discard:
+            self._text_parts.append(data)
+
+    def get_text(self) -> str:
+        # Collapse whitespace and trim
+        text = "".join(self._text_parts)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text[:MAX_DESC_LENGTH]
+
+
+def _strip_html(text: str) -> str:
+    """Remove HTML tags and <style>/<script> content; collapse whitespace; truncate."""
+    if not text:
+        return ""
+    stripper = _HTMLStripper()
+    stripper.feed(text)
+    return stripper.get_text()
 
 
 class TopicCandidate:
@@ -109,7 +150,9 @@ def parse_generic_rss(xml: str, source: str) -> list[TopicCandidate]:
     for item in root.iter("item"):
         title = (item.findtext("title") or "").strip()
         link = (item.findtext("link") or "").strip()
-        desc = (item.findtext("description") or "").strip()
+        raw_desc = (item.findtext("description") or "").strip()
+        # Strip HTML tags, remove <style>/<script> content, collapse whitespace, truncate
+        desc = _strip_html(raw_desc)
         pub = item.findtext("pubDate") or item.findtext("{http://purl.org/dc/elements/1.1/}date") or ""
         if title and link:
             items.append(TopicCandidate(title, link, source, desc, pub))
