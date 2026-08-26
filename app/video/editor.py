@@ -86,7 +86,10 @@ class VideoEditor:
         # Build filter graph
         filter_parts = []
         input_args = []
-        scene_inputs = []  # list of input indices for each scene
+        # Scene inputs are appended one '-i' flag at a time, in order, so
+        # scene i maps directly to ffmpeg input index i. Do NOT derive this
+        # from len(input_args) — each scene adds 6 args, so that breaks.
+        scene_inputs = self._scene_input_indices(len(plan.scenes))
 
         # Scene inputs
         for i, (scene, asset) in enumerate(zip(plan.scenes, scene_assets)):
@@ -96,7 +99,6 @@ class VideoEditor:
                 # Fallback: generate solid color using ffmpeg color source
                 input_args.extend(["-f", "lavfi", "-t", str(scene.end - scene.start), "-i",
                                  f"color=c=0x1a1a2e:size={VIDEO_WIDTH}x{VIDEO_HEIGHT}:rate={VIDEO_FPS}"])
-            scene_inputs.append(len(input_args) // 2 - 1)  # input index
 
         # Voice input
         voice_idx = len(scene_inputs)
@@ -130,7 +132,10 @@ class VideoEditor:
             filter_parts.append("[voice]anull[audio]")
 
         # Caption burning (ASS)
-        filter_parts.append(f"[video]subtitles='{ass_path.replace(chr(92), '/')}'[vout]")
+        # ffmpeg's subtitles filter parses ':' as an option separator, so the
+        # Windows drive-letter colon in the path must be escaped as '\:'.
+        safe_ass = ass_path.replace("\\", "/").replace(":", "\\:")
+        filter_parts.append(f"[video]subtitles='{safe_ass}'[vout]")
 
         filter_complex = ";".join(filter_parts)
 
@@ -167,6 +172,17 @@ class VideoEditor:
                     extra={"job_id": job_id, "stage": "render", "status": "done"})
 
         return RenderResult(output_path, dur, w, h)
+
+    def _scene_input_indices(self, n_scenes: int) -> list[int]:
+        """Return the ffmpeg input index for each scene.
+
+        Scenes are added one '-i' flag at a time, in order, so scene i is
+        input index i. This is intentionally a direct counter — the previous
+        implementation derived the index from len(input_args) // 2 - 1, which
+        assumed 2 args per scene but each scene actually adds 6, producing
+        [2, 5, 8, ...] and referencing non-existent streams.
+        """
+        return list(range(n_scenes))
 
     def _build_scene_filter(self, scene: Scene, asset: AssetRecord, dur: float) -> str:
         """Build filter for a single scene with motion."""
