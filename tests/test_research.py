@@ -180,13 +180,13 @@ def test_all_feeds_failed_warning(caplog):
 
     caplog.set_level(logging.WARNING, logger="app.research.sources")
 
-    # In tests: no YOUTUBE_API_KEY -> trending uses scrape, which catches all exceptions
-    # and returns [], so it never "fails" (doesn't raise). Only RSS feeds can fail.
-    # So total failable sources = len(FEEDS) only.
-    with patch("app.research.sources._fetch", side_effect=Exception("404 Not Found")):
+    # Mock ALL external sources to fail: RSS feeds (_fetch) AND YouTube trending (raise exception)
+    # Must patch at the module where it's USED (sources.py), not where it's defined
+    with patch("app.research.sources._fetch", side_effect=Exception("404 Not Found")), \
+         patch("app.research.sources.fetch_trending_topics", side_effect=Exception("API Error")):
         result = discover_candidates(max_per_source=2)
     assert result == []
-    total_sources = len(FEEDS)  # trending scrape never raises in tests
+    total_sources = len(FEEDS) + 1  # RSS feeds + YouTube trending (as one source)
     all_failed_logs = [r for r in caplog.records
                        if "all" in r.message.lower() and "failed" in r.message.lower()]
     assert len(all_failed_logs) == 1
@@ -195,7 +195,8 @@ def test_all_feeds_failed_warning(caplog):
 
     # Partial failures should NOT trigger this warning - they log per-source
     caplog.clear()
-    with patch("app.research.sources._fetch") as mock_fetch:
+    with patch("app.research.sources._fetch") as mock_fetch, \
+         patch("app.research.sources.fetch_trending_topics", return_value=[]):
         mock_fetch.side_effect = [
             '<rss><channel><item><title>OK</title><link>http://ok</link></item></channel></rss>',
             Exception("404 Not Found"),

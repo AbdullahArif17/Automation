@@ -228,6 +228,7 @@ def discover_candidates(max_per_source: int = 5, include_trending: bool = True) 
             logger.info(f"youtube_trending: {len(trending)} topics",
                         extra={"stage": "discover", "status": "ok"})
         except Exception as exc:
+            failed_count += 1
             logger.warning(f"youtube_trending failed: {exc}",
                            extra={"stage": "discover", "status": "error", "error": str(exc)})
 

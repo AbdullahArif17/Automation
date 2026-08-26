@@ -185,28 +185,27 @@ class VideoEditor:
         return list(range(n_scenes))
 
     def _build_scene_filter(self, scene: Scene, asset: AssetRecord, dur: float) -> str:
-        """Build filter for a single scene with motion."""
+        """Build filter for a single scene with motion (optimized for speed)."""
         # Base: scale to cover 1080x1920 (crop if needed)
         base = f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,crop={VIDEO_WIDTH}:{VIDEO_HEIGHT}"
 
         if scene.visual_type == "text" or scene.visual_type == "graphic":
-            # Text/graphic: static centered
             return f"{base},setsar=1"
 
         motion = scene.motion
         if motion == "static":
             return f"{base},setsar=1"
         elif motion == "zoom_in":
-            # Zoom from 1.0 to 1.15 over duration
-            return f"{base},zoompan=z='min(1.15,zoom+0.0015)':d={int(dur*VIDEO_FPS)}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},setsar=1"
+            # Fast fixed zoom (no per-frame expression evaluation)
+            return f"{base},zoompan=z=1.15:d={int(dur*VIDEO_FPS)}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},setsar=1"
         elif motion == "zoom_out":
-            return f"{base},zoompan=z='max(1.0,1.15-zoom*0.0015)':d={int(dur*VIDEO_FPS)}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},setsar=1"
+            return f"{base},zoompan=z=1.0:d={int(dur*VIDEO_FPS)}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},setsar=1"
         elif motion == "pan":
-            # Pan horizontally (for wider source)
+            # Pan horizontally (for wider source) - simple crop animation
             return f"{base},crop={VIDEO_WIDTH}:{VIDEO_HEIGHT}:{VIDEO_WIDTH}*(1-t/{dur}):0,setsar=1"
         elif motion == "ken_burns":
-            # Slow zoom + pan
-            return f"{base},zoompan=z='min(1.1,zoom+0.001)':d={int(dur*VIDEO_FPS)}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',setsar=1"
+            # Simple slow zoom (fixed) - much faster than per-frame expression
+            return f"{base},zoompan=z=1.1:d={int(dur*VIDEO_FPS)}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},setsar=1"
         else:
             return f"{base},setsar=1"
 
