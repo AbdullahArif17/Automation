@@ -20,6 +20,9 @@ data/*.sqlite
 # Output
 output/
 
+# Clipper source videos (user drops long-form videos here)
+input/
+
 # IDE
 .vscode/
 .idea/
@@ -40,3 +43,7 @@ logs/
 # Test temp dir
 .pytest_tmp/
 .pytest_cache/
+
+IMG*
+Nasheed*
+my_video.mov*

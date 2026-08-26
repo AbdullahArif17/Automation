@@ -41,6 +41,16 @@ def _env_int(key: str, default: int) -> int:
         return default
 
 
+def _env_float(key: str, default: float) -> float:
+    val = os.getenv(key)
+    if val is None or val.strip() == "":
+        return default
+    try:
+        return float(val)
+    except ValueError:
+        return default
+
+
 # Topic scoring weights — configurable, sum should be ~1.0.
 DEFAULT_TOPIC_WEIGHTS: dict[str, float] = {
     "trend": 0.25,
@@ -92,6 +102,13 @@ class Settings:
     # Topic scoring weights
     topic_weights: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_TOPIC_WEIGHTS))
 
+    # Clipper (video-to-shorts)
+    whisper_model_size: str = field(default_factory=lambda: os.getenv("WHISPER_MODEL_SIZE", "base.en"))
+    clip_crop_mode: str = field(default_factory=lambda: os.getenv("CLIP_CROP_MODE", "center"))
+    clip_min_score: float = field(default_factory=lambda: _env_float("CLIP_MIN_SCORE", 0.5))
+    clip_input_dir: Path = field(default_factory=lambda: BASE_DIR / "input")
+    clip_output_dir: Path = field(default_factory=lambda: BASE_DIR / "output")
+
     # Paths
     data_dir: Path = field(default_factory=lambda: DATA_DIR)
     output_dir: Path = field(default_factory=lambda: OUTPUT_DIR)
@@ -102,6 +119,8 @@ class Settings:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.assets_dir.mkdir(parents=True, exist_ok=True)
+        self.clip_input_dir.mkdir(parents=True, exist_ok=True)
+        self.clip_output_dir.mkdir(parents=True, exist_ok=True)
 
     @property
     def db_path(self) -> Path:

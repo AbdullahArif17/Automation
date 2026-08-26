@@ -107,7 +107,8 @@ CREATE TABLE IF NOT EXISTS videos (
     likes INTEGER DEFAULT 0,
     comments INTEGER DEFAULT 0,
     watch_time INTEGER DEFAULT 0,
-    average_view_duration REAL DEFAULT 0
+    average_view_duration REAL DEFAULT 0,
+    source_type TEXT DEFAULT 'generated'  -- 'generated' | 'clipped'
 );
 
 CREATE TABLE IF NOT EXISTS publishing_jobs (
@@ -185,6 +186,22 @@ class Database:
     def _init_schema(self) -> None:
         self.conn.executescript(SCHEMA)
         self.conn.commit()
+        self._migrate_schema()
+
+    def _migrate_schema(self) -> None:
+        """Add columns that did not exist when older databases were first created.
+
+        Runs idempotently: each ALTER TABLE is guarded by a column-existence check.
+        """
+        # videos.source_type was added to distinguish 'generated' vs 'clipped' videos.
+        existing = {row["name"] for row in self.conn.execute("PRAGMA table_info(videos)")}
+        if "source_type" not in existing:
+            self.conn.execute(
+                "ALTER TABLE videos ADD COLUMN source_type TEXT DEFAULT 'generated'"
+            )
+            self.conn.commit()
+            logger.info("migrated videos table: added source_type column",
+                        extra={"stage": "database", "status": "migrated"})
 
     def close(self) -> None:
         self.conn.close()
