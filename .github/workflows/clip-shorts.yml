@@ -1,0 +1,192 @@
+name: Clip Long Video to Shorts (Automated)
+
+# Fully automated: clips YOUR long-form videos into Shorts.
+# Two source modes (pick ONE via secrets):
+#   1. S3 bucket: drop videos in a bucket/prefix (original behavior)
+#   2. YouTube channel: polls YOUR channel for new long-form uploads
+#
+# How to use:
+#   1. Set required secrets in repository settings (see below).
+#   2. For S3 mode: drop long-form videos into the bucket/prefix.
+#      For YouTube mode: just upload long-form to your channel normally.
+#   3. Workflow runs on schedule (every 4h) and clips new videos.
+#   4. Can also be triggered manually via Actions tab.
+#
+# Required repository secrets (in addition to existing YouTube/Gemini ones):
+#   COMMON:
+#     YOUTUBE_API_KEY           -- YouTube Data API v3 key (for channel polling)
+#                                 Enable "YouTube Data API v3" in Google Cloud,
+#                                 create API key, restrict to YouTube Data API v3.
+#
+#   MODE 1 - S3 BUCKET (pick one):
+#     CLIP_SOURCE_S3_BUCKET        -- bucket name (e.g. "my-clips-bucket")
+#     CLIP_SOURCE_S3_PREFIX        -- optional folder prefix (e.g. "raw/")
+#     CLIP_SOURCE_S3_ENDPOINT      -- REQUIRED for R2/Spaces/MinIO
+#                                      e.g. "https://<acct>.r2.cloudflarestorage.com"
+#                                      omit for AWS S3
+#     CLIP_SOURCE_S3_ACCESS_KEY    -- access key
+#     CLIP_SOURCE_S3_SECRET_KEY    -- secret key
+#     CLIP_SOURCE_S3_REGION        -- region (default: "us-east-1", "auto" for R2)
+#
+#   MODE 2 - YOUR YOUTUBE CHANNEL (pick one):
+#     CLIP_SOURCE_YT_CHANNEL_ID    -- your channel ID (UCxxxxxx) or handle (@name)
+#     CLIP_SOURCE_YT_PLAYLIST_ID  -- optional: specific playlist ID (e.g. "UUxxxxx" = uploads)
+#                                    if omitted, polls the channel's uploads playlist
+#
+# Optional (add as repo vars or workflow_dispatch inputs):
+#   CLIP_MAX_VIDEOS_PER_RUN      -- max videos per run (default: 2)
+#   CLIP_MAX_CLIPS_PER_VIDEO     -- max Shorts per source (default: 1)
+#   CLIP_UPLOAD                  -- "true" or "false" (default: "true")
+#   WHISPER_MODEL_SIZE           -- "base.en", "small", etc. (default: "base.en")
+#   CLIP_CROP_MODE               -- "center" (default: "center")
+#
+# To override on a manual run: Actions -> Run workflow -> set inputs.
+
+on:
+  schedule:
+    # Every 4 hours = 6 runs/day. With max 2 videos/run = 12 videos/day max.
+    # Adjust cron/max_videos to stay within your free-tier quotas.
+    - cron: "0 */4 * * *"
+  workflow_dispatch:
+    inputs:
+      source_mode:
+        description: "Source mode: 's3' (bucket) or 'youtube' (your channel)"
+        required: false
+        default: ""
+        type: choice
+        options: ["", "s3", "youtube"]
+      max_videos:
+        description: "Max videos to process this run (overrides CLIP_MAX_VIDEOS_PER_RUN)"
+        required: false
+        default: ""
+      max_clips:
+        description: "Max Shorts per source video (overrides CLIP_MAX_CLIPS_PER_VIDEO)"
+        required: false
+        default: ""
+      upload:
+        description: "Upload generated Shorts to YouTube"
+        required: false
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+      whisper_model_size:
+        description: "Whisper model size"
+        required: false
+        default: "base.en"
+      crop_mode:
+        description: "9:16 crop mode"
+        required: false
+        default: "center"
+
+concurrency:
+  group: clip-shorts
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  clip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      APP_ENV: production
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL: gemini-3.5-flash-lite
+      YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+      YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+      YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+      CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+      AUTO_UPLOAD: "true"
+      AUTO_PUBLISH: "true"
+      TTS_PROVIDER: local
+      MEDIA_PROVIDER: free
+      # Independent DB for clipped videos
+      DATABASE_URL: sqlite:///data/clipper.db
+      # CI backoff for Gemini free tier
+      GEMINI_CI_BASE_DELAY: "20.0"
+      GEMINI_CI_MAX_DELAY: "60.0"
+      GEMINI_TIMEOUT: "30.0"
+      # Clipper auto-ingest config (from secrets + optional dispatch inputs)
+      # Common
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      # S3 mode
+      CLIP_SOURCE_S3_BUCKET: ${{ secrets.CLIP_SOURCE_S3_BUCKET }}
+      CLIP_SOURCE_S3_PREFIX: ${{ secrets.CLIP_SOURCE_S3_PREFIX }}
+      CLIP_SOURCE_S3_ENDPOINT: ${{ secrets.CLIP_SOURCE_S3_ENDPOINT }}
+      CLIP_SOURCE_S3_ACCESS_KEY: ${{ secrets.CLIP_SOURCE_S3_ACCESS_KEY }}
+      CLIP_SOURCE_S3_SECRET_KEY: ${{ secrets.CLIP_SOURCE_S3_SECRET_KEY }}
+      CLIP_SOURCE_S3_REGION: ${{ secrets.CLIP_SOURCE_S3_REGION }}
+      # YouTube channel mode
+      CLIP_SOURCE_YT_CHANNEL_ID: ${{ secrets.CLIP_SOURCE_YT_CHANNEL_ID }}
+      CLIP_SOURCE_YT_PLAYLIST_ID: ${{ secrets.CLIP_SOURCE_YT_PLAYLIST_ID }}
+      # Limits
+      CLIP_MAX_VIDEOS_PER_RUN: ${{ github.event.inputs.max_videos != '' && github.event.inputs.max_videos || '2' }}
+      CLIP_MAX_CLIPS_PER_VIDEO: ${{ github.event.inputs.max_clips != '' && github.event.inputs.max_clips || '1' }}
+      CLIP_UPLOAD: ${{ github.event.inputs.upload || 'true' }}
+      WHISPER_MODEL_SIZE: ${{ github.event.inputs.whisper_model_size || 'base.en' }}
+      CLIP_CROP_MODE: ${{ github.event.inputs.crop_mode || 'center' }}
+      # Source mode selector (dispatch input or auto-detect from secrets)
+      CLIP_SOURCE_MODE: ${{ github.event.inputs.source_mode || '' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.4.0
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg espeak-ng
+          # yt-dlp for YouTube channel mode downloads
+          pip install --no-cache-dir yt-dlp
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+
+      - name: Create data/output dirs
+        run: |
+          mkdir -p data output input assets
+
+      - name: Restore previous clipper database
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: clip-shorts.yml
+          branch: ${{ github.ref_name }}
+          name: clipper-output-.*
+          name_is_regexp: true
+          path: /tmp/prev-artifact
+          if_no_artifact_found: warn
+        continue-on-error: true
+
+      - name: Restore clipper.db from artifact
+        run: |
+          if [ -f /tmp/prev-artifact/data/clipper.db ]; then
+            cp /tmp/prev-artifact/data/clipper.db data/clipper.db
+            echo "Restored data/clipper.db from previous run"
+          else
+            echo "No previous clipper database found, starting fresh"
+          fi
+          rm -rf /tmp/prev-artifact
+
+      - name: Run automated clipper (poll source, clip new videos, upload)
+        run: |
+          python -m app.clipper.__auto_main__
+
+      - name: Upload artifacts (clips, database)
+        if: always()
+        uses: actions/upload-artifact@v4.4.3
+        with:
+          name: clipper-output-${{ github.run_id }}
+          path: |
+            output/*.mp4
+            data/clipper.db
+          retention-days: 7

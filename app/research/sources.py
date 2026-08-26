@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from typing import Any
 
+from app.research.youtube_trending import fetch_trending_topics, TrendingTopic
 from app.utils.logging import get_logger
 from app.utils.retry import retry
 
@@ -191,10 +192,12 @@ def parse_arxiv(xml: str, source: str) -> list[TopicCandidate]:
     return items
 
 
-def discover_candidates(max_per_source: int = 5) -> list[TopicCandidate]:
-    """Fetch all configured feeds, return deduplicated candidates."""
+def discover_candidates(max_per_source: int = 5, include_trending: bool = True) -> list[TopicCandidate]:
+    """Fetch all configured feeds + YouTube trending, return deduplicated candidates."""
     all_cands: list[TopicCandidate] = []
     failed_count = 0
+
+    # 1. RSS/Atom feeds
     for feed in FEEDS:
         try:
             xml = _fetch(feed["url"])
@@ -207,12 +210,35 @@ def discover_candidates(max_per_source: int = 5) -> list[TopicCandidate]:
             failed_count += 1
             logger.warning(f"source {feed['name']} failed: {exc}",
                            extra={"stage": "discover", "status": "error", "error": str(exc)})
+
+    # 2. YouTube trending topics (converted to TopicCandidate format)
+    if include_trending:
+        try:
+            trending = fetch_trending_topics(max_results=max_per_source * 2)
+            for t in trending:
+                # Convert TrendingTopic -> TopicCandidate
+                # Use keywords as summary; no real URL since it's a topic not a video
+                all_cands.append(TopicCandidate(
+                    title=t.title,
+                    url=f"youtube_trending:{t.category_id}:{t.title[:40]}",
+                    source="youtube_trending",
+                    summary=", ".join(t.keywords[:8]),
+                    published=datetime.now(timezone.utc).isoformat(),
+                ))
+            logger.info(f"youtube_trending: {len(trending)} topics",
+                        extra={"stage": "discover", "status": "ok"})
+        except Exception as exc:
+            logger.warning(f"youtube_trending failed: {exc}",
+                           extra={"stage": "discover", "status": "error", "error": str(exc)})
+
     # All-feeds-failed warning: distinct from "feeds worked but nothing new"
-    if failed_count == len(FEEDS) and len(FEEDS) > 0:
+    total_sources = len(FEEDS) + (1 if include_trending else 0)
+    if failed_count == total_sources and total_sources > 0:
         logger.warning(
-            f"all {len(FEEDS)} research feeds failed — check for dead/moved URLs",
-            extra={"stage": "discover", "status": "all_failed", "error": "all_feeds_failed"},
+            f"all {total_sources} research sources failed — check for dead/moved URLs or API key",
+            extra={"stage": "discover", "status": "all_failed", "error": "all_sources_failed"},
         )
+
     # Deduplicate by URL
     seen = set()
     unique = []

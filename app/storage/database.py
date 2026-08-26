@@ -193,15 +193,27 @@ class Database:
 
         Runs idempotently: each ALTER TABLE is guarded by a column-existence check.
         """
-        # videos.source_type was added to distinguish 'generated' vs 'clipped' videos.
         existing = {row["name"] for row in self.conn.execute("PRAGMA table_info(videos)")}
+
+        # source_type: distinguish 'generated' vs 'clipped' videos.
         if "source_type" not in existing:
             self.conn.execute(
                 "ALTER TABLE videos ADD COLUMN source_type TEXT DEFAULT 'generated'"
             )
-            self.conn.commit()
             logger.info("migrated videos table: added source_type column",
                         extra={"stage": "database", "status": "migrated"})
+
+        # source_etag + source_size: de-dup key for clipped videos (S3 ETag + bytes).
+        if "source_etag" not in existing:
+            self.conn.execute("ALTER TABLE videos ADD COLUMN source_etag TEXT")
+            logger.info("migrated videos table: added source_etag column",
+                        extra={"stage": "database", "status": "migrated"})
+        if "source_size" not in existing:
+            self.conn.execute("ALTER TABLE videos ADD COLUMN source_size INTEGER")
+            logger.info("migrated videos table: added source_size column",
+                        extra={"stage": "database", "status": "migrated"})
+
+        self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()

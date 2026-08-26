@@ -1,9 +1,13 @@
-"""Phase 10 tests: YouTube auth, uploader (mocked), publishing guard."""
+"""Phase 10 tests: YouTube auth, uploader (mocked), publishing guard.
+Also covers YouTube trending topics fetch (Option C).
+"""
 import json
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.research.youtube_trending import TrendingTopic, fetch_trending_topics, fetch_trending_topics_api, fetch_trending_topics_scrape
 from app.youtube.auth import YouTubeAuth, YouTubeCredentials
 from app.youtube.uploader import YouTubeUploader, UploadResult
 
@@ -123,3 +127,70 @@ def test_upload_init_failure():
          patch.object(auth, "credentials", return_value=YouTubeCredentials("tok")):
         with pytest.raises(RuntimeError):
             uploader.upload("fake.mp4", "Title", "Desc", ["tag"])
+
+
+# --- YouTube Trending Topics tests --------------------------------------------
+
+def test_trending_topic_dataclass():
+    t = TrendingTopic("Test Title", ["kw1", "kw2"], "28", 10000)
+    assert t.title == "Test Title"
+    assert t.keywords == ["kw1", "kw2"]
+    assert t.category_id == "28"
+    assert t.view_count == 10000
+
+
+def test_fetch_trending_api_requires_key(monkeypatch):
+    """Without YOUTUBE_API_KEY, API fetch returns empty list."""
+    monkeypatch.delenv("YOUTUBE_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    result = fetch_trending_topics_api(max_results=5)
+    assert result == []
+
+
+def test_fetch_trending_api_mocked():
+    """Mock a successful API response."""
+    mock_json = json.dumps({
+        "items": [{
+            "snippet": {
+                "title": "Hot AI Video",
+                "tags": ["AI", "tech"],
+                "categoryId": "28",
+            },
+            "statistics": {"viewCount": "123456"},
+            "topicDetails": {"topicCategories": ["https://en.wikipedia.org/wiki/Artificial_intelligence"]}
+        }]
+    })
+
+    with patch("urllib.request.urlopen") as mock_open:
+        mock_cm = MagicMock()
+        mock_cm.__enter__ = lambda s: MagicMock(read=lambda: mock_json.encode())
+        mock_cm.__exit__ = lambda s, *a: None
+        mock_open.return_value = mock_cm
+
+        with patch.dict(os.environ, {"YOUTUBE_API_KEY": "test_key"}):
+            result = fetch_trending_topics_api(max_results=5)
+
+    assert len(result) == 1
+    assert result[0].title == "Hot AI Video"
+    assert "AI" in result[0].keywords
+    assert "Artificial intelligence" in result[0].keywords
+    assert result[0].view_count == 123456
+
+
+def test_fetch_trending_scrape_fallback(monkeypatch):
+    """Scrape returns empty on error (no network in tests)."""
+    # Don't actually scrape in tests - just verify the function exists and handles missing data
+    with patch("urllib.request.urlopen") as mock_open:
+        mock_open.side_effect = Exception("network error")
+        result = fetch_trending_topics_scrape()
+        assert result == []
+
+
+def test_fetch_trending_prefers_api(monkeypatch):
+    """When API key is set, fetch_trending_topics calls API path."""
+    with patch("app.research.youtube_trending.fetch_trending_topics_api") as mock_api:
+        mock_api.return_value = [TrendingTopic("API Result", ["kw"], "28", 100)]
+        with patch.dict(os.environ, {"YOUTUBE_API_KEY": "test_key"}):
+            result = fetch_trending_topics(prefer_api=True)
+        mock_api.assert_called_once()
+        assert result[0].title == "API Result"
