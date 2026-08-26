@@ -147,3 +147,55 @@ def test_render_multi_scene_end_to_end(ffmpeg_bins, tmp_path):
     types = {s["codec_type"] for s in info["streams"]}
     assert "video" in types and "audio" in types
     assert 5.5 <= float(info["format"]["duration"]) <= 6.5
+
+
+def _render_single_scene(ffmpeg_bins, tmp_path, motion: str, scene_dur: float = 2.5) -> float:
+    """Helper: render one scene with given motion, return probed duration."""
+    ffmpeg, ffprobe = ffmpeg_bins
+
+    voice_path = str(tmp_path / f"voice_{motion}.mp3")
+    out_path = str(tmp_path / f"out_{motion}.mp4")
+
+    # Short audio matching scene duration
+    subprocess.run(
+        [ffmpeg, "-y", "-f", "lavfi", "-i", f"sine=frequency=220:duration={scene_dur + 0.5}",
+         "-c:a", "libmp3lame", voice_path],
+        check=True, capture_output=True,
+    )
+
+    plan = _make_plan(n=1, scene_dur=scene_dur)
+    plan.scenes[0].motion = motion
+    assets = _make_fallback_assets(1)
+    voice = VoiceResult(audio_path=voice_path, duration=scene_dur + 0.5, sample_rate=44100, channels=2)
+    captions = CaptionTrack(lines=[
+        CaptionLine(index=1, start=0.0, end=scene_dur, text="Test caption"),
+    ])
+
+    editor = VideoEditor(ffmpeg_bin=ffmpeg, ffprobe_bin=ffprobe)
+    result = editor.render(
+        plan, assets, voice, captions,
+        output_path=out_path, job_id=f"test_{motion}",
+    )
+
+    # Probe actual output duration via ffprobe
+    probe = subprocess.run(
+        [ffprobe, "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1", out_path],
+        check=True, capture_output=True, text=True,
+    )
+    return float(probe.stdout.strip())
+
+
+@pytest.mark.parametrize("motion,scene_dur", [
+    ("zoom_in", 2.5),
+    ("zoom_out", 2.5),
+    ("ken_burns", 2.5),
+    ("static", 2.5),
+    ("pan", 2.5),
+])
+def test_motion_type_duration(ffmpeg_bins, tmp_path, motion, scene_dur):
+    """Each motion type produces output matching requested scene duration."""
+    actual_dur = _render_single_scene(ffmpeg_bins, tmp_path, motion, scene_dur)
+    # Tolerance: +/- 0.5s (accounts for keyframe rounding, concat, -shortest)
+    assert abs(actual_dur - scene_dur) <= 0.5, \
+        f"{motion}: expected ~{scene_dur}s, got {actual_dur:.2f}s"

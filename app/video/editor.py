@@ -93,11 +93,18 @@ class VideoEditor:
 
         # Scene inputs
         for i, (scene, asset) in enumerate(zip(plan.scenes, scene_assets)):
+            dur = scene.end - scene.start
             if asset.local_path and os.path.exists(asset.local_path):
-                input_args.extend(["-loop", "1", "-t", str(scene.end - scene.start), "-i", asset.local_path])
+                # Use -framerate 1 on input so looped image yields exactly 1 frame;
+                # zoompan's own d/fps then controls output duration/frame count.
+                # Without this, image2 defaults to ~25fps → zoompan's 'd' applies per
+                # input frame, massively inflating duration.
+                input_args.extend(["-loop", "1", "-framerate", "1", "-t", str(dur), "-i", asset.local_path])
             else:
-                # Fallback: generate solid color using ffmpeg color source
-                input_args.extend(["-f", "lavfi", "-t", str(scene.end - scene.start), "-i",
+                # Fallback: generate solid color using ffmpeg color source.
+                # lavfi color source with explicit rate=VIDEO_FPS produces correct
+                # frame count natively; no input framerate override needed.
+                input_args.extend(["-f", "lavfi", "-t", str(dur), "-i",
                                  f"color=c=0x1a1a2e:size={VIDEO_WIDTH}x{VIDEO_HEIGHT}:rate={VIDEO_FPS}"])
 
         # Voice input
@@ -185,7 +192,7 @@ class VideoEditor:
         return list(range(n_scenes))
 
     def _build_scene_filter(self, scene: Scene, asset: AssetRecord, dur: float) -> str:
-        """Build filter for a single scene with motion (optimized for speed)."""
+        """Build filter for a single scene with motion."""
         # Base: scale to cover 1080x1920 (crop if needed)
         base = f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,crop={VIDEO_WIDTH}:{VIDEO_HEIGHT}"
 
@@ -196,16 +203,23 @@ class VideoEditor:
         if motion == "static":
             return f"{base},setsar=1"
         elif motion == "zoom_in":
-            # Fast fixed zoom (no per-frame expression evaluation)
-            return f"{base},zoompan=z=1.15:d={int(dur*VIDEO_FPS)}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},setsar=1"
+            # Progressive zoom from 1.0 to 1.15 over the scene duration.
+            # Requires input framerate=1 (set in render()) so zoompan's 'd'
+            # applies once per scene, not per input frame.
+            return (f"{base},zoompan=z='min(1.15,zoom+0.0015)':"
+                    f"d={int(dur*VIDEO_FPS)}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},setsar=1")
         elif motion == "zoom_out":
-            return f"{base},zoompan=z=1.0:d={int(dur*VIDEO_FPS)}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},setsar=1"
+            # Progressive zoom out from 1.15 to 1.0
+            return (f"{base},zoompan=z='max(1.0,1.15-zoom*0.0015)':"
+                    f"d={int(dur*VIDEO_FPS)}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},setsar=1")
         elif motion == "pan":
             # Pan horizontally (for wider source) - simple crop animation
             return f"{base},crop={VIDEO_WIDTH}:{VIDEO_HEIGHT}:{VIDEO_WIDTH}*(1-t/{dur}):0,setsar=1"
         elif motion == "ken_burns":
-            # Simple slow zoom (fixed) - much faster than per-frame expression
-            return f"{base},zoompan=z=1.1:d={int(dur*VIDEO_FPS)}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},setsar=1"
+            # Slow zoom + pan (Ken Burns effect)
+            return (f"{base},zoompan=z='min(1.1,zoom+0.001)':"
+                    f"d={int(dur*VIDEO_FPS)}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS}:"
+                    f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',setsar=1")
         else:
             return f"{base},setsar=1"
 
