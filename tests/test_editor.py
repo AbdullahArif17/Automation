@@ -48,19 +48,22 @@ def _make_fallback_assets(n: int) -> list[AssetRecord]:
 
 
 def _make_image_assets(ffmpeg, tmp_path, n: int, scene_dur: float) -> list[AssetRecord]:
-    """Create real image files (1x1 pixel PNG) for testing the image-loop input path."""
+    """Create real image files for testing the image-loop input path."""
     assets = []
     for i in range(n):
         img_path = str(tmp_path / f"test_img_{i}.png")
-        # Create a tiny 1x1 pixel PNG via ffmpeg
+        # Create a small valid PNG via ffmpeg.
+        # - size=64x64: lavfi color source requires valid non-zero dimensions
+        # - -update 1: required by image2 muxer to write a single frame (not a sequence)
+        # - -frames:v 1: only encode one frame from the color source
         subprocess.run(
-            [ffmpeg, "-y", "-f", "lavfi", "-i", "color=c=red:size=1x1:rate=1",
-             "-frames:v", "1", img_path],
+            [ffmpeg, "-y", "-f", "lavfi", "-i", "color=c=red:size=64x64:rate=1",
+             "-frames:v", "1", "-update", "1", img_path],
             check=True, capture_output=True,
         )
         assets.append(AssetRecord(
             id=i + 1, source="test", source_url="", license="",
-            local_path=img_path, type="image", duration=scene_dur, width=1, height=1, hash="",
+            local_path=img_path, type="image", duration=scene_dur, width=64, height=64, hash="",
         ))
     return assets
 
