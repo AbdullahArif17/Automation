@@ -47,6 +47,24 @@ def _make_fallback_assets(n: int) -> list[AssetRecord]:
     ]
 
 
+def _make_image_assets(ffmpeg, tmp_path, n: int, scene_dur: float) -> list[AssetRecord]:
+    """Create real image files (1x1 pixel PNG) for testing the image-loop input path."""
+    assets = []
+    for i in range(n):
+        img_path = str(tmp_path / f"test_img_{i}.png")
+        # Create a tiny 1x1 pixel PNG via ffmpeg
+        subprocess.run(
+            [ffmpeg, "-y", "-f", "lavfi", "-i", "color=c=red:size=1x1:rate=1",
+             "-frames:v", "1", img_path],
+            check=True, capture_output=True,
+        )
+        assets.append(AssetRecord(
+            id=i + 1, source="test", source_url="", license="",
+            local_path=img_path, type="image", duration=scene_dur, width=1, height=1, hash="",
+        ))
+    return assets
+
+
 def _make_plan(n: int = 3, scene_dur: float = 2.0):
     scenes = []
     t = 0.0
@@ -149,12 +167,16 @@ def test_render_multi_scene_end_to_end(ffmpeg_bins, tmp_path):
     assert 5.5 <= float(info["format"]["duration"]) <= 6.5
 
 
-def _render_single_scene(ffmpeg_bins, tmp_path, motion: str, scene_dur: float = 2.5) -> float:
-    """Helper: render one scene with given motion, return probed duration."""
+def _render_single_scene(ffmpeg_bins, tmp_path, motion: str, scene_dur: float = 2.5,
+                          asset_type: str = "fallback") -> float:
+    """Helper: render one scene with given motion, return probed duration.
+
+    asset_type: "fallback" (lavfi color) or "image" (real image file loop)
+    """
     ffmpeg, ffprobe = ffmpeg_bins
 
-    voice_path = str(tmp_path / f"voice_{motion}.mp3")
-    out_path = str(tmp_path / f"out_{motion}.mp4")
+    voice_path = str(tmp_path / f"voice_{motion}_{asset_type}.mp3")
+    out_path = str(tmp_path / f"out_{motion}_{asset_type}.mp4")
 
     # Short audio matching scene duration
     subprocess.run(
@@ -165,7 +187,10 @@ def _render_single_scene(ffmpeg_bins, tmp_path, motion: str, scene_dur: float = 
 
     plan = _make_plan(n=1, scene_dur=scene_dur)
     plan.scenes[0].motion = motion
-    assets = _make_fallback_assets(1)
+    if asset_type == "image":
+        assets = _make_image_assets(ffmpeg, tmp_path, 1, scene_dur)
+    else:
+        assets = _make_fallback_assets(1)
     voice = VoiceResult(audio_path=voice_path, duration=scene_dur + 0.5, sample_rate=44100, channels=2)
     captions = CaptionTrack(lines=[
         CaptionLine(index=1, start=0.0, end=scene_dur, text="Test caption"),
@@ -174,7 +199,7 @@ def _render_single_scene(ffmpeg_bins, tmp_path, motion: str, scene_dur: float = 
     editor = VideoEditor(ffmpeg_bin=ffmpeg, ffprobe_bin=ffprobe)
     result = editor.render(
         plan, assets, voice, captions,
-        output_path=out_path, job_id=f"test_{motion}",
+        output_path=out_path, job_id=f"test_{motion}_{asset_type}",
     )
 
     # Probe actual output duration via ffprobe
@@ -186,16 +211,23 @@ def _render_single_scene(ffmpeg_bins, tmp_path, motion: str, scene_dur: float = 
     return float(probe.stdout.strip())
 
 
-@pytest.mark.parametrize("motion,scene_dur", [
-    ("zoom_in", 2.5),
-    ("zoom_out", 2.5),
-    ("ken_burns", 2.5),
-    ("static", 2.5),
-    ("pan", 2.5),
+# Cross product: both asset paths x all motion types
+@pytest.mark.parametrize("asset_type,motion", [
+    ("fallback", "zoom_in"),
+    ("fallback", "zoom_out"),
+    ("fallback", "ken_burns"),
+    ("fallback", "static"),
+    ("fallback", "pan"),
+    ("image", "zoom_in"),
+    ("image", "zoom_out"),
+    ("image", "ken_burns"),
+    ("image", "static"),
+    ("image", "pan"),
 ])
-def test_motion_type_duration(ffmpeg_bins, tmp_path, motion, scene_dur):
-    """Each motion type produces output matching requested scene duration."""
-    actual_dur = _render_single_scene(ffmpeg_bins, tmp_path, motion, scene_dur)
+def test_motion_type_duration_both_asset_paths(ffmpeg_bins, tmp_path, asset_type, motion):
+    """Each motion type produces correct duration for BOTH lavfi-fallback and image-loop inputs."""
+    scene_dur = 2.5
+    actual_dur = _render_single_scene(ffmpeg_bins, tmp_path, motion, scene_dur, asset_type)
     # Tolerance: +/- 0.5s (accounts for keyframe rounding, concat, -shortest)
     assert abs(actual_dur - scene_dur) <= 0.5, \
-        f"{motion}: expected ~{scene_dur}s, got {actual_dur:.2f}s"
+        f"{asset_type}/{motion}: expected ~{scene_dur}s, got {actual_dur:.2f}s"

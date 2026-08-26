@@ -95,15 +95,15 @@ class VideoEditor:
         for i, (scene, asset) in enumerate(zip(plan.scenes, scene_assets)):
             dur = scene.end - scene.start
             if asset.local_path and os.path.exists(asset.local_path):
-                # Use -framerate 1 on input so looped image yields exactly 1 frame;
-                # zoompan's own d/fps then controls output duration/frame count.
-                # Without this, image2 defaults to ~25fps → zoompan's 'd' applies per
-                # input frame, massively inflating duration.
-                input_args.extend(["-loop", "1", "-framerate", "1", "-t", str(dur), "-i", asset.local_path])
+                # Looped image input. Duration is set via -t; exact frame count
+                # doesn't matter because _build_scene_filter prepends
+                # trim=end_frame=1 for zoompan motions to force exactly one
+                # input frame into the motion chain.
+                input_args.extend(["-loop", "1", "-t", str(dur), "-i", asset.local_path])
             else:
                 # Fallback: generate solid color using ffmpeg color source.
-                # lavfi color source with explicit rate=VIDEO_FPS produces correct
-                # frame count natively; no input framerate override needed.
+                # lavfi color with rate=VIDEO_FPS; trim=end_frame=1 in the
+                # filter chain will reduce to a single frame for zoompan.
                 input_args.extend(["-f", "lavfi", "-t", str(dur), "-i",
                                  f"color=c=0x1a1a2e:size={VIDEO_WIDTH}x{VIDEO_HEIGHT}:rate={VIDEO_FPS}"])
 
@@ -196,32 +196,39 @@ class VideoEditor:
         # Base: scale to cover 1080x1920 (crop if needed)
         base = f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,crop={VIDEO_WIDTH}:{VIDEO_HEIGHT}"
 
+        # zoompan's 'd' (output frame count) applies PER INPUT FRAME, not once
+        # per stream. Both looped images (-loop 1 -t dur) and lavfi color
+        # sources produce multiple input frames. Force exactly ONE frame into
+        # the motion chain with trim, so zoompan's d/fps controls total
+        # output frames/duration correctly.
+        needs_trim = scene.motion in ("zoom_in", "zoom_out", "ken_burns")
+        trim_prefix = "trim=end_frame=1,setpts=PTS-STARTPTS," if needs_trim else ""
+
         if scene.visual_type == "text" or scene.visual_type == "graphic":
-            return f"{base},setsar=1"
+            return f"{trim_prefix}{base},setsar=1"
 
         motion = scene.motion
         if motion == "static":
-            return f"{base},setsar=1"
+            return f"{trim_prefix}{base},setsar=1"
         elif motion == "zoom_in":
             # Progressive zoom from 1.0 to 1.15 over the scene duration.
-            # Requires input framerate=1 (set in render()) so zoompan's 'd'
-            # applies once per scene, not per input frame.
-            return (f"{base},zoompan=z='min(1.15,zoom+0.0015)':"
+            return (f"{trim_prefix}{base},zoompan=z='min(1.15,zoom+0.0015)':"
                     f"d={int(dur*VIDEO_FPS)}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},setsar=1")
         elif motion == "zoom_out":
             # Progressive zoom out from 1.15 to 1.0
-            return (f"{base},zoompan=z='max(1.0,1.15-zoom*0.0015)':"
+            return (f"{trim_prefix}{base},zoompan=z='max(1.0,1.15-zoom*0.0015)':"
                     f"d={int(dur*VIDEO_FPS)}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS},setsar=1")
         elif motion == "pan":
-            # Pan horizontally (for wider source) - simple crop animation
-            return f"{base},crop={VIDEO_WIDTH}:{VIDEO_HEIGHT}:{VIDEO_WIDTH}*(1-t/{dur}):0,setsar=1"
+            # Pan horizontally (for wider source) - simple crop animation over time.
+            # Does NOT use zoompan; trim=1 would break the time-based crop.
+            return f"{trim_prefix}{base},crop={VIDEO_WIDTH}:{VIDEO_HEIGHT}:{VIDEO_WIDTH}*(1-t/{dur}):0,setsar=1"
         elif motion == "ken_burns":
             # Slow zoom + pan (Ken Burns effect)
-            return (f"{base},zoompan=z='min(1.1,zoom+0.001)':"
+            return (f"{trim_prefix}{base},zoompan=z='min(1.1,zoom+0.001)':"
                     f"d={int(dur*VIDEO_FPS)}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={VIDEO_FPS}:"
                     f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',setsar=1")
         else:
-            return f"{base},setsar=1"
+            return f"{trim_prefix}{base},setsar=1"
 
     def _probe_duration(self, path: str) -> float:
         cmd = [self.ffprobe, "-v", "error", "-show_entries", "format=duration",
