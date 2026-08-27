@@ -230,21 +230,51 @@ def download_video_s3(source: SourceVideo, dest_dir: Path) -> Path:
 
 
 def download_video_youtube(source: SourceVideo, dest_dir: Path) -> Path:
-    """Download YouTube video using yt-dlp (best quality)."""
+    """Download YouTube video using yt-dlp (best quality).
+
+    Requires YT_COOKIES_PATH env var (path to cookies.txt decoded from
+    YT_COOKIES_B64 repo secret by the CI workflow) to bypass bot-detection
+    on CI runners. Fails with a clear error if the path is missing.
+    """
     import subprocess
+
+    cookies_path = os.getenv("YT_COOKIES_PATH")
+    if not cookies_path or not Path(cookies_path).exists():
+        raise RuntimeError(
+            "YT_COOKIES_PATH not set or file missing. The CI workflow must decode "
+            "YT_COOKIES_B64 secret to cookies.txt before running. Export cookies.txt "
+            "from a logged-in YouTube session (e.g. via 'Get cookies.txt LOCALLY' "
+            "browser extension), base64-encode it, store as YT_COOKIES_B64 repo secret."
+        )
+
     dest_dir.mkdir(parents=True, exist_ok=True)
     local_path = dest_dir / f"{source.yt_video_id}.mp4"
 
-    # yt-dlp should be available (install in CI if needed)
     cmd = [
         "yt-dlp",
+        "--cookies", cookies_path,
         "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "-o", str(local_path),
         f"https://www.youtube.com/watch?v={source.yt_video_id}",
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-    if result.returncode != 0:
-        raise RuntimeError(f"yt-dlp failed: {result.stderr[-1000:]}")
+
+    # Retry on bot-detection (transient), capped at 2 attempts
+    last_err = ""
+    for attempt in range(2):
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if result.returncode == 0:
+                break
+            last_err = result.stderr[-1000:]
+            # Bot-detection is often transient; retry once
+            if "confirm you're not a bot" in last_err.lower() and attempt == 0:
+                logger.warning(f"yt-dlp bot-detection hit for {source.yt_video_id}, retrying")
+                continue
+            raise RuntimeError(f"yt-dlp failed: {last_err}")
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"yt-dlp timed out downloading {source.yt_video_id}")
+    else:
+        raise RuntimeError(f"yt-dlp failed after retry: {last_err}")
 
     size = local_path.stat().st_size
     logger.info(f"downloaded youtube:{source.yt_video_id} -> {local_path} ({size} bytes)")

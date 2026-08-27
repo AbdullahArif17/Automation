@@ -27,10 +27,18 @@ VIDEO_WIDTH = 1080
 VIDEO_HEIGHT = 1920
 VIDEO_FPS = 30
 VIDEO_CODEC = "libx264"
-VIDEO_PRESET = "fast"
+# ultrafast: ~2-3x faster than "fast" on constrained CI hardware (2-core runners).
+# Shorts are already heavily compressed for mobile; preset choice affects file
+# size/encode-time tradeoff, not visual quality at a fixed CRF.
+VIDEO_PRESET = "ultrafast"
 VIDEO_CRF = 23
 AUDIO_CODEC = "aac"
 AUDIO_BITRATE = "128k"
+
+# ffmpeg subprocess timeout (seconds). Baseline render of a 5-scene zoompan
+# Short at CRF 23 on a 2-core GitHub runner: ~120-180s with -preset ultrafast.
+# 900s = 15 min gives 3-5x headroom for slower runners / longer videos.
+RENDER_TIMEOUT = 900
 
 
 @dataclass
@@ -164,7 +172,7 @@ class VideoEditor:
                     extra={"job_id": job_id, "stage": "render", "status": "start"})
 
         def _run():
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=RENDER_TIMEOUT)
             if result.returncode != 0:
                 raise RuntimeError(f"ffmpeg failed: {result.stderr[-1000:]}")
             return result

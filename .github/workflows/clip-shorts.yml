@@ -1,6 +1,6 @@
 name: Clip Long Video to Shorts (Automated)
 
-# Fully automated: clips YOUR long-form videos into Shorts.
+# Clips YOUR long-form videos into Shorts. AUTOMATED (every 8h) + manual trigger.
 # Two source modes (pick ONE via secrets):
 #   1. S3 bucket: drop videos in a bucket/prefix (original behavior)
 #   2. YouTube channel: polls YOUR channel for new long-form uploads
@@ -9,14 +9,25 @@ name: Clip Long Video to Shorts (Automated)
 #   1. Set required secrets in repository settings (see below).
 #   2. For S3 mode: drop long-form videos into the bucket/prefix.
 #      For YouTube mode: just upload long-form to your channel normally.
-#   3. Workflow runs on schedule (every 4h) and clips new videos.
-#   4. Can also be triggered manually via Actions tab.
+#   3. Runs automatically every 8h OR trigger manually via Actions tab.
 #
 # Required repository secrets (in addition to existing YouTube/Gemini ones):
 #   COMMON:
 #     YOUTUBE_API_KEY           -- YouTube Data API v3 key (for channel polling)
 #                                 Enable "YouTube Data API v3" in Google Cloud,
 #                                 create API key, restrict to YouTube Data API v3.
+#     YT_COOKIES_B64            -- base64-encoded cookies.txt from a logged-in
+#                                 YouTube session. EXPORT STEPS:
+#                                   a. Install "Get cookies.txt LOCALLY" browser
+#                                      extension (Chrome/Firefox).
+#                                   b. Go to youtube.com, log in.
+#                                   c. Click extension → export cookies for
+#                                      youtube.com → save as cookies.txt.
+#                                   d. base64-encode:  base64 -w0 cookies.txt
+#                                   e. Store output as YT_COOKIES_B64 repo secret.
+#                                 NOTE: cookies expire (~monthly). If downloads
+#                                 start failing with "not a bot" errors, re-export
+#                                 and update the secret.
 #
 #   MODE 1 - S3 BUCKET (pick one):
 #     CLIP_SOURCE_S3_BUCKET        -- bucket name (e.g. "my-clips-bucket")
@@ -42,11 +53,13 @@ name: Clip Long Video to Shorts (Automated)
 #
 # To override on a manual run: Actions -> Run workflow -> set inputs.
 
+# --- SCHEDULE ---
+# Runs every 8 hours (3x/day). Reduced from 4h to lower YouTube API + bot-detection load.
+# -------------------------------
+
 on:
   schedule:
-    # Every 4 hours = 6 runs/day. With max 2 videos/run = 12 videos/day max.
-    # Adjust cron/max_videos to stay within your free-tier quotas.
-    - cron: "0 */4 * * *"
+    - cron: "0 */8 * * *"
   workflow_dispatch:
     inputs:
       source_mode:
@@ -121,6 +134,9 @@ jobs:
       # YouTube channel mode
       CLIP_SOURCE_YT_CHANNEL_ID: ${{ secrets.CLIP_SOURCE_YT_CHANNEL_ID }}
       CLIP_SOURCE_YT_PLAYLIST_ID: ${{ secrets.CLIP_SOURCE_YT_PLAYLIST_ID }}
+      # yt-dlp cookie auth: base64 secret decoded to cookies.txt by a prior step
+      YT_COOKIES_B64: ${{ secrets.YT_COOKIES_B64 }}
+      YT_COOKIES_PATH: ${{ github.workspace }}/cookies.txt
       # Limits
       CLIP_MAX_VIDEOS_PER_RUN: ${{ github.event.inputs.max_videos != '' && github.event.inputs.max_videos || '2' }}
       CLIP_MAX_CLIPS_PER_VIDEO: ${{ github.event.inputs.max_clips != '' && github.event.inputs.max_clips || '1' }}
@@ -155,6 +171,12 @@ jobs:
       - name: Create data/output dirs
         run: |
           mkdir -p data output input assets
+
+      - name: Decode YouTube cookies (bypass bot-detection)
+        if: env.YT_COOKIES_B64 != ''
+        run: |
+          echo "$YT_COOKIES_B64" | base64 -d > "$YT_COOKIES_PATH"
+          echo "Decoded cookies.txt ($(wc -c < "$YT_COOKIES_PATH") bytes)"
 
       - name: Restore previous clipper database
         uses: dawidd6/action-download-artifact@v6
