@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,6 +11,7 @@ import pytest
 from app.clipper.captions import build_caption_track_from_whisper
 from app.clipper.cut import build_crop_filter
 from app.clipper.highlight import ClipCandidate, parse_highlight_response
+from app.clipper.storage_poller import validate_cookies_file
 from app.clipper.transcribe import (
     SegmentTimestamp, TranscriptResult, WordTimestamp, get_transcript_cache_path
 )
@@ -339,6 +342,64 @@ def test_clip_duplicate_check_only_against_clipped():
             assert result2.reason == "no duplicates"
         finally:
             db.close()
+
+
+# --- Cookie validation ---
+def test_validate_cookies_file_valid():
+    """Valid Netscape-format cookies file passes validation."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cookies_path = Path(tmpdir) / "cookies.txt"
+        # Valid 7-field lines (domain, flag, path, secure, expiration, name, value)
+        cookies_path.write_text(
+            "# Netscape HTTP Cookie File\n"
+            ".youtube.com\tTRUE\t/\tTRUE\t1822391581\tPREF\tf6=40000000\n"
+            ".youtube.com\tTRUE\t/\tFALSE\t1822330270\tLOGIN_INFO\tAFmmF2swRQIgO5Rh\n"
+        )
+
+        count, auth_ok = validate_cookies_file(cookies_path)
+        assert count == 2
+        # auth_ok will be False in test env (no real yt-dlp auth), but format passes
+        assert isinstance(auth_ok, bool)
+
+
+def test_validate_cookies_file_malformed_line():
+    """Line with wrong field count raises ValueError with line number."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cookies_path = Path(tmpdir) / "cookies.txt"
+        # Line 3 has only 6 fields (missing tab between expiration and name = LOGIN_INFOmissing_tab as one field)
+        cookies_path.write_text(
+            "# Netscape HTTP Cookie File\n"
+            ".youtube.com\tTRUE\t/\tTRUE\t1822391581\tPREF\tf6=40000000\n"
+            ".youtube.com\tTRUE\t/\tFALSE\t1822330270\tLOGIN_INFOmissing_tab\n"
+        )
+
+        with pytest.raises(ValueError, match=r"Invalid cookie line 3: expected 7 tab-separated fields, got 6"):
+            validate_cookies_file(cookies_path)
+
+
+def test_validate_cookies_file_crlf_normalized():
+    """CRLF line endings are normalized to LF and don't break parsing."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cookies_path = Path(tmpdir) / "cookies.txt"
+        # Write with CRLF (Windows-style)
+        cookies_path.write_bytes(
+            b"# Netscape HTTP Cookie File\r\n"
+            b".youtube.com\tTRUE\t/\tTRUE\t1822391581\tPREF\tf6=40000000\r\n"
+            b".youtube.com\tTRUE\t/\tFALSE\t1822330270\tLOGIN_INFO\tAFmmF2swRQIgO5Rh\r\n"
+        )
+
+        count, auth_ok = validate_cookies_file(cookies_path)
+        assert count == 2
+
+
+def test_validate_cookies_file_empty_raises():
+    """File with only comments/blanks raises ValueError."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cookies_path = Path(tmpdir) / "cookies.txt"
+        cookies_path.write_text("# Just a comment\n\n# Another comment\n")
+
+        with pytest.raises(ValueError, match="No valid cookie data lines found"):
+            validate_cookies_file(cookies_path)
 
 
 if __name__ == "__main__":

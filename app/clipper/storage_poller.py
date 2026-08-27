@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import hashlib
 import json
+import subprocess
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,66 @@ from app.storage.database import Database
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def validate_cookies_file(cookies_path: Path, test_url: str = "https://www.youtube.com/") -> tuple[int, bool]:
+    """
+    Validate a Netscape-format cookies.txt file.
+
+    Checks:
+    1. Line endings normalized to LF
+    2. Every non-comment, non-blank line has exactly 7 tab-separated fields
+    3. Cookies actually authenticate with yt-dlp against a test URL
+
+    Returns: (valid_cookie_count, auth_ok)
+    Raises: ValueError with clear message if format validation fails
+    """
+    # Read and normalize line endings (CRLF -> LF)
+    raw = cookies_path.read_bytes()
+    normalized = raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    cookies_path.write_bytes(normalized)
+
+    text = normalized.decode("utf-8", errors="replace")
+    lines = text.split("\n")
+
+    valid_lines = []
+    for i, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        parts = stripped.split("\t")
+        if len(parts) != 7:
+            raise ValueError(
+                f"Invalid cookie line {i}: expected 7 tab-separated fields, "
+                f"got {len(parts)}. Line: {line[:100]}"
+            )
+        valid_lines.append(line)
+
+    cookie_count = len(valid_lines)
+    if cookie_count == 0:
+        raise ValueError("No valid cookie data lines found (only comments/blanks)")
+
+    # Lightweight auth verification: try to extract channel_id from a known page
+    # using the cookies. This fails fast if cookies are expired/invalid.
+    auth_ok = False
+    try:
+        result = subprocess.run(
+            ["yt-dlp", "--cookies", str(cookies_path), "--skip-download",
+             "--print", "channel_id", test_url],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            auth_ok = True
+            logger.info(f"Cookie auth verified: channel_id={result.stdout.strip()}")
+        else:
+            logger.warning(f"Cookie auth check failed: yt-dlp returned {result.returncode}, stderr={result.stderr[:200]}")
+    except subprocess.TimeoutExpired:
+        logger.warning("Cookie auth check timed out (30s)")
+    except Exception as exc:
+        logger.warning(f"Cookie auth check error: {exc}")
+
+    logger.info(f"Cookies validated: {cookie_count} data lines, auth_ok={auth_ok}")
+    return cookie_count, auth_ok
 
 
 @dataclass
@@ -238,8 +299,8 @@ def download_video_youtube(source: SourceVideo, dest_dir: Path) -> Path:
     """
     import subprocess
 
-    cookies_path = os.getenv("YT_COOKIES_PATH")
-    if not cookies_path or not Path(cookies_path).exists():
+    cookies_path_str = os.getenv("YT_COOKIES_PATH")
+    if not cookies_path_str or not Path(cookies_path_str).exists():
         raise RuntimeError(
             "YT_COOKIES_PATH not set or file missing. The CI workflow must decode "
             "YT_COOKIES_B64 secret to cookies.txt before running. Export cookies.txt "
@@ -247,12 +308,29 @@ def download_video_youtube(source: SourceVideo, dest_dir: Path) -> Path:
             "browser extension), base64-encode it, store as YT_COOKIES_B64 repo secret."
         )
 
+    cookies_path = Path(cookies_path_str)
+
+    # Validate cookies file format and verify they actually authenticate
+    # This catches malformed exports (wrong field count, CRLF issues) and
+    # expired cookies before wasting time on download attempts.
+    try:
+        cookie_count, auth_ok = validate_cookies_file(cookies_path)
+    except ValueError as exc:
+        raise RuntimeError(f"Cookie validation failed: {exc}") from exc
+
+    if not auth_ok:
+        raise RuntimeError(
+            f"Cookies failed authentication check ({cookie_count} cookies loaded but "
+            f"yt-dlp could not verify session). Re-export cookies.txt from a logged-in "
+            f"YouTube session and update YT_COOKIES_B64 secret."
+        )
+
     dest_dir.mkdir(parents=True, exist_ok=True)
     local_path = dest_dir / f"{source.yt_video_id}.mp4"
 
     cmd = [
         "yt-dlp",
-        "--cookies", cookies_path,
+        "--cookies", cookies_path_str,
         "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "-o", str(local_path),
         f"https://www.youtube.com/watch?v={source.yt_video_id}",

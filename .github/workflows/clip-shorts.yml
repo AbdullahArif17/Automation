@@ -181,6 +181,11 @@ jobs:
           echo "$YT_COOKIES_B64" | base64 -d > "$YT_COOKIES_PATH"
           echo "Decoded cookies.txt ($(wc -c < "$YT_COOKIES_PATH") bytes)"
 
+      - name: Validate YouTube cookies (format + auth check)
+        if: env.YT_COOKIES_B64 != ''
+        run: |
+          python app/clipper/validate_cookies.py "${{ env.YT_COOKIES_PATH }}"
+
       - name: Restore previous clipper database
         uses: dawidd6/action-download-artifact@v6
         with:
