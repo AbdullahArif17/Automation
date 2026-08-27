@@ -165,6 +165,9 @@ jobs:
           sudo apt-get install -y ffmpeg espeak-ng curl
           # yt-dlp for YouTube channel mode downloads
           pip install --no-cache-dir yt-dlp
+          # yt-dlp-ejs: EJS challenge solver for YouTube bot-detection.
+          # Required when yt-dlp is installed via pip (not the standalone binary).
+          pip install --no-cache-dir yt-dlp-ejs
 
       - name: Install Deno (JS runtime for yt-dlp YouTube extraction)
         run: |

@@ -27,8 +27,11 @@ logger = get_logger(__name__)
 # - --js-runtimes deno: enables JS challenge solving (required for bot-detection)
 # - --user-agent: modern Chrome UA to match real browser fingerprint
 # - --extractor-args youtube:player_client=web: avoids mobile/embedded player bot checks
+# - --remote-components ejs:github: fetches EJS challenge-solver from GitHub at runtime
+#   if not bundled locally (needed when yt-dlp installed via pip, not standalone binary).
 YT_DLP_COMMON_ARGS = [
     "--js-runtimes", "deno",
+    "--remote-components", "ejs:github",
     "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     "--extractor-args", "youtube:player_client=web",
 ]
