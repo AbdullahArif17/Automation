@@ -282,13 +282,23 @@ def build_pipeline(settings: Settings | None = None, mock_llm: bool = False) -> 
     from app.ai.gemini import GeminiProvider
     from app.ai.provider import MockProvider
     from app.media.asset_manager import AssetManager
+    from app.media.image_provider import PexelsProvider, UnsplashSourceProvider
+    from app.media.stock_provider import PexelsVideoProvider, PixabayVideoProvider
     from app.media.voice import get_voice_provider
     from app.video.editor import VideoEditor
 
     settings = settings or get_settings()
     provider = MockProvider() if mock_llm else GeminiProvider()
     db = Database(settings.db_path)
-    assets = AssetManager(db)
+
+    # Wire up all configured free-tier providers for resilience
+    unsplash = UnsplashSourceProvider()
+    pexels_img = PexelsProvider(settings.pexels_api_key) if settings.pexels_api_key else None
+    pexels_vid = PexelsVideoProvider(settings.pexels_api_key) if settings.pexels_api_key else None
+    pixabay_vid = PixabayVideoProvider(settings.pixabay_api_key) if settings.pixabay_api_key else None
+
+    assets = AssetManager(db, unsplash=unsplash, pexels_img=pexels_img,
+                          pexels_vid=pexels_vid, pixabay_vid=pixabay_vid, settings=settings)
     voice = get_voice_provider(settings.tts_provider)
     editor = VideoEditor()
     return Pipeline(provider, db, assets, voice, editor, settings)

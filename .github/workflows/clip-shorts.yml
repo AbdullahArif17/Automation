@@ -145,6 +145,9 @@ jobs:
       CLIP_CROP_MODE: ${{ github.event.inputs.crop_mode || 'center' }}
       # Source mode selector (dispatch input or auto-detect from secrets)
       CLIP_SOURCE_MODE: ${{ github.event.inputs.source_mode || '' }}
+      # Optional free-tier media APIs for asset resilience (fallback chain)
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+      PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
 
     steps:
       - name: Checkout

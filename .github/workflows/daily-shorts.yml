@@ -40,6 +40,9 @@ jobs:
       TTS_PROVIDER: local
       MEDIA_PROVIDER: free
       DATABASE_URL: sqlite:///data/app.db
+      # Optional free-tier media APIs for asset resilience (fallback chain)
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+      PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
 
     steps:
       - name: Checkout
@@ -118,6 +121,9 @@ jobs:
       YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
       CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
       DATABASE_URL: sqlite:///data/app.db
+      # Optional free-tier media APIs for asset resilience
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+      PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
 
     steps:
       - uses: actions/checkout@v4.2.2

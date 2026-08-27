@@ -79,9 +79,15 @@ class MockVoiceProvider(VoiceProvider):
 
 
 class EspeakVoiceProvider(VoiceProvider):
-    """espeak-ng TTS - lightweight, robotic but always works if installed."""
+    """espeak-ng TTS - lightweight, robotic but always works if installed.
 
-    def __init__(self, voice: str = "en-us", speed: int = 175):
+    Voice options: use `espeak-ng --voices` to list. Good female English voices:
+    - en-us+f1, en-us+f2, en-us+f3, en-us+f4 (US English female variants)
+    - en+f1, en+f2, en+f3, en+f4 (British English female variants)
+    Speed: 80-200 wpm (words per minute). Lower = slower.
+    """
+
+    def __init__(self, voice: str = "en-us+f3", speed: int = 135):
         self.voice = voice
         self.speed = speed
 

@@ -93,3 +93,78 @@ def test_visual_plan_validates_timing():
     assert plan.scenes[0].start == 0
     # Last scene should end at duration
     assert abs(plan.scenes[-1].end - 30) < 1.0
+
+
+def test_asset_manager_fallback_unsplash_to_pexels():
+    """When Unsplash fails, Pexels should be tried before color-fill fallback."""
+    from app.media.image_provider import ImageAsset, UnsplashSourceProvider, PexelsProvider
+    from app.media.asset_manager import AssetManager, AssetRecord
+
+    mock_db = MagicMock()
+    mock_db.fetchone.return_value = None  # no cache hit
+
+    # Track which provider gets called
+    calls = []
+
+    # Mock Unsplash to fail
+    class FailingUnsplash(UnsplashSourceProvider):
+        def fetch(self, query, width=1080, height=1920, job_id=None):
+            calls.append("unsplash")
+            raise RuntimeError("Unsplash 503")
+
+    # Mock Pexels to succeed
+    class WorkingPexels(PexelsProvider):
+        def search(self, query, job_id=None):
+            calls.append("pexels")
+            return [ImageAsset(
+                url="https://pexels.test/img.jpg",
+                local_path="/tmp/pexels_test.jpg",
+                width=1080, height=1920,
+                license="Pexels License", source="pexels", hash="abc123"
+            )]
+
+    failing_unsplash = FailingUnsplash()
+    working_pexels = WorkingPexels(api_key="test_key")
+
+    mgr = AssetManager(mock_db, unsplash=failing_unsplash, pexels_img=working_pexels)
+
+    # Mock _store_asset to return a record without DB
+    stored = {}
+    def mock_store(asset, job_id=None):
+        stored["asset"] = asset
+        return AssetRecord(
+            id=1, source=asset.source, source_url=asset.url, license=asset.license,
+            local_path=asset.local_path, type="image", duration=0,
+            width=asset.width, height=asset.height, hash=asset.hash
+        )
+    mgr._store_asset = mock_store
+
+    result = mgr.get_or_fetch_image("test query", job_id="test")
+
+    # Should have tried unsplash first, then pexels
+    assert calls == ["unsplash", "pexels"]
+    # Should have returned the Pexels asset
+    assert result is not None
+    assert result.source == "pexels"
+    assert stored["asset"].source == "pexels"
+
+
+def test_asset_manager_all_providers_fail_returns_none():
+    """When ALL providers fail, get_or_fetch_image returns None (color-fill fallback in caller)."""
+    from app.media.image_provider import UnsplashSourceProvider, PexelsProvider
+    from app.media.asset_manager import AssetManager
+
+    mock_db = MagicMock()
+    mock_db.fetchone.return_value = None
+
+    class FailingUnsplash(UnsplashSourceProvider):
+        def fetch(self, query, width=1080, height=1920, job_id=None):
+            raise RuntimeError("Unsplash 503")
+
+    class FailingPexels(PexelsProvider):
+        def search(self, query, job_id=None):
+            raise RuntimeError("Pexels 429")
+
+    mgr = AssetManager(mock_db, unsplash=FailingUnsplash(), pexels_img=FailingPexels(api_key="key"))
+    result = mgr.get_or_fetch_image("test query", job_id="test")
+    assert result is None

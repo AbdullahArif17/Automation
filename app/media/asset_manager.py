@@ -11,6 +11,7 @@ from app.storage.database import Database
 from app.media.image_provider import ImageAsset, UnsplashSourceProvider, PexelsProvider
 from app.media.stock_provider import VideoAsset, PexelsVideoProvider, PixabayVideoProvider
 from app.utils.logging import get_logger
+from app.config.settings import get_settings
 
 logger = get_logger(__name__)
 
@@ -34,12 +35,14 @@ class AssetManager:
                  unsplash: UnsplashSourceProvider | None = None,
                  pexels_img: PexelsProvider | None = None,
                  pexels_vid: PexelsVideoProvider | None = None,
-                 pixabay_vid: PixabayVideoProvider | None = None):
+                 pixabay_vid: PixabayVideoProvider | None = None,
+                 settings=None):
         self.db = db
+        settings = settings or get_settings()
         self.unsplash = unsplash or UnsplashSourceProvider()
-        self.pexels_img = pexels_img
-        self.pexels_vid = pexels_vid
-        self.pixabay_vid = pixabay_vid
+        self.pexels_img = pexels_img or (PexelsProvider(settings.pexels_api_key) if settings.pexels_api_key else None)
+        self.pexels_vid = pexels_vid or (PexelsVideoProvider(settings.pexels_api_key) if settings.pexels_api_key else None)
+        self.pixabay_vid = pixabay_vid or (PixabayVideoProvider(settings.pixabay_api_key) if settings.pixabay_api_key else None)
 
     def get_or_fetch_image(self, query: str, job_id: Optional[str] = None) -> Optional[AssetRecord]:
         # Check cache by hash of query (approximate dedup)

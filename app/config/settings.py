@@ -95,6 +95,10 @@ class Settings:
     tts_provider: str = field(default_factory=lambda: os.getenv("TTS_PROVIDER", "local"))
     media_provider: str = field(default_factory=lambda: os.getenv("MEDIA_PROVIDER", "free"))
 
+    # Free media API keys (optional - enables Pexels/Pixabay for better assets)
+    pexels_api_key: str = field(default_factory=lambda: os.getenv("PEXELS_API_KEY", ""))
+    pixabay_api_key: str = field(default_factory=lambda: os.getenv("PIXABAY_API_KEY", ""))
+
     # Quality thresholds
     min_script_quality: float = field(default_factory=lambda: float(os.getenv("MIN_SCRIPT_QUALITY", "7.5")))
     max_regeneration_attempts: int = field(default_factory=lambda: _env_int("MAX_REGENERATION_ATTEMPTS", 3))
