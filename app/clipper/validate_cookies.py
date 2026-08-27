@@ -3,6 +3,9 @@
 
 Usage: python validate_cookies.py <cookies_path> [test_url]
 Exits 0 on success, 1 on validation failure.
+
+Default test_url is https://www.youtube.com/feed/subscriptions (requires auth).
+For testing a specific video, pass: https://www.youtube.com/watch?v=VIDEO_ID
 """
 import sys
 from pathlib import Path
@@ -19,7 +22,7 @@ def main() -> int:
         return 2
 
     cookies_path = Path(sys.argv[1])
-    test_url = sys.argv[2] if len(sys.argv) > 2 else "https://www.youtube.com/"
+    test_url = sys.argv[2] if len(sys.argv) > 2 else "https://www.youtube.com/feed/subscriptions"
 
     try:
         count, auth_ok = validate_cookies_file(cookies_path, test_url)
