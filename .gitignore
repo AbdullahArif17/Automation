@@ -47,3 +47,5 @@ logs/
 IMG*
 Nasheed*
 my_video.mov*
+# cookies.txt contains live YouTube session credentials — must never be committed
+cookies.txt*
