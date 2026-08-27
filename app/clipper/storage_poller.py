@@ -23,6 +23,16 @@ from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Common yt-dlp arguments for YouTube extraction:
+# - --js-runtimes deno: enables JS challenge solving (required for bot-detection)
+# - --user-agent: modern Chrome UA to match real browser fingerprint
+# - --extractor-args youtube:player_client=web: avoids mobile/embedded player bot checks
+YT_DLP_COMMON_ARGS = [
+    "--js-runtimes", "deno",
+    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "--extractor-args", "youtube:player_client=web",
+]
+
 
 def validate_cookies_file(cookies_path: Path, test_url: str = "https://www.youtube.com/feed/subscriptions") -> tuple[int, bool]:
     """
@@ -74,10 +84,11 @@ def validate_cookies_file(cookies_path: Path, test_url: str = "https://www.youtu
     # Lightweight auth verification: try to fetch a page that requires login.
     # /feed/subscriptions returns empty/redirect without valid cookies, so
     # yt-dlp will fail or return no output if cookies are invalid/expired.
+    # Uses module-level YT_DLP_COMMON_ARGS for JS runtime, UA, and player_client.
     auth_ok = False
     try:
         result = subprocess.run(
-            ["yt-dlp", "--cookies", str(cookies_path), "--skip-download",
+            ["yt-dlp", *YT_DLP_COMMON_ARGS, "--cookies", str(cookies_path), "--skip-download",
              "--print", "id", test_url],
             capture_output=True, text=True, timeout=30
         )
@@ -347,6 +358,7 @@ def download_video_youtube(source: SourceVideo, dest_dir: Path) -> Path:
 
     cmd = [
         "yt-dlp",
+        *YT_DLP_COMMON_ARGS,
         "--cookies", cookies_path_str,
         "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "-o", str(local_path),

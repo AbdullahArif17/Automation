@@ -162,9 +162,14 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg espeak-ng
+          sudo apt-get install -y ffmpeg espeak-ng curl
           # yt-dlp for YouTube channel mode downloads
           pip install --no-cache-dir yt-dlp
+
+      - name: Install Deno (JS runtime for yt-dlp YouTube extraction)
+        run: |
+          curl -fsSL https://deno.land/install.sh | sh -s -- -y
+          echo "$HOME/.deno/bin" >> $GITHUB_PATH
 
       - name: Install Python dependencies
         run: |
