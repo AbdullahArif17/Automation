@@ -22,6 +22,35 @@ from app.utils.retry import retry
 
 logger = get_logger(__name__)
 
+
+def _build_scene_input_args(asset: AssetRecord, dur: float) -> list[str]:
+    """Build ffmpeg input arguments for a single scene's asset.
+
+    Branches on asset.type to use correct input options:
+    - image: -loop 1 -t <dur> -i (loops single frame for scene duration)
+    - video: -t <dur> -i (trim if longer) or -stream_loop -1 -t <dur> -i (loop if shorter)
+    - missing/fallback: lavfi color source
+    """
+    if asset.local_path and os.path.exists(asset.local_path):
+        if asset.type == "video":
+            # Real video file: do NOT use -loop 1 (image-specific).
+            # If video is longer than needed, trim on input with -t.
+            # If video is shorter, loop it with -stream_loop -1.
+            asset_dur = max(0.0, asset.duration)
+            if asset_dur >= dur:
+                # Video covers the scene; trim to exact duration.
+                return ["-t", str(dur), "-i", asset.local_path]
+            else:
+                # Video shorter than scene: loop it to fill duration.
+                return ["-stream_loop", "-1", "-t", str(dur), "-i", asset.local_path]
+        else:
+            # Image (or unknown type treated as image): loop single frame.
+            return ["-loop", "1", "-t", str(dur), "-i", asset.local_path]
+    else:
+        # Fallback: generate solid color using ffmpeg color source.
+        return ["-f", "lavfi", "-t", str(dur), "-i",
+                f"color=c=0x1a1a2e:size={1080}x{1920}:rate=30"]
+
 # Output specs
 VIDEO_WIDTH = 1080
 VIDEO_HEIGHT = 1920
@@ -102,18 +131,7 @@ class VideoEditor:
         # Scene inputs
         for i, (scene, asset) in enumerate(zip(plan.scenes, scene_assets)):
             dur = scene.end - scene.start
-            if asset.local_path and os.path.exists(asset.local_path):
-                # Looped image input. Duration is set via -t; exact frame count
-                # doesn't matter because _build_scene_filter prepends
-                # trim=end_frame=1 for zoompan motions to force exactly one
-                # input frame into the motion chain.
-                input_args.extend(["-loop", "1", "-t", str(dur), "-i", asset.local_path])
-            else:
-                # Fallback: generate solid color using ffmpeg color source.
-                # lavfi color with rate=VIDEO_FPS; trim=end_frame=1 in the
-                # filter chain will reduce to a single frame for zoompan.
-                input_args.extend(["-f", "lavfi", "-t", str(dur), "-i",
-                                 f"color=c=0x1a1a2e:size={VIDEO_WIDTH}x{VIDEO_HEIGHT}:rate={VIDEO_FPS}"])
+            input_args.extend(_build_scene_input_args(asset, dur))
 
         # Voice input
         voice_idx = len(scene_inputs)
@@ -204,18 +222,26 @@ class VideoEditor:
         # Base: scale to cover 1080x1920 (crop if needed)
         base = f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:force_original_aspect_ratio=increase,crop={VIDEO_WIDTH}:{VIDEO_HEIGHT}"
 
+        # For video assets, zoompan/ken_burns don't make sense — force safe motions.
+        # Video already has motion; we just want to fit it to 9:16.
+        motion = scene.motion
+        if asset.type == "video" and motion in ("zoom_in", "zoom_out", "ken_burns"):
+            # Force pan for video (safe, just crops over time) or static
+            motion = "pan"
+            logger.debug(f"Overriding motion '{scene.motion}' to 'pan' for video asset",
+                         extra={"asset_type": asset.type, "original_motion": scene.motion})
+
         # zoompan's 'd' (output frame count) applies PER INPUT FRAME, not once
         # per stream. Both looped images (-loop 1 -t dur) and lavfi color
         # sources produce multiple input frames. Force exactly ONE frame into
         # the motion chain with trim, so zoompan's d/fps controls total
         # output frames/duration correctly.
-        needs_trim = scene.motion in ("zoom_in", "zoom_out", "ken_burns")
+        needs_trim = motion in ("zoom_in", "zoom_out", "ken_burns")
         trim_prefix = "trim=end_frame=1,setpts=PTS-STARTPTS," if needs_trim else ""
 
         if scene.visual_type == "text" or scene.visual_type == "graphic":
             return f"{trim_prefix}{base},setsar=1"
 
-        motion = scene.motion
         if motion == "static":
             return f"{trim_prefix}{base},setsar=1"
         elif motion == "zoom_in":

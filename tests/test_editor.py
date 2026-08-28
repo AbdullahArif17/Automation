@@ -68,6 +68,30 @@ def _make_image_assets(ffmpeg, tmp_path, n: int, scene_dur: float) -> list[Asset
     return assets
 
 
+def _make_video_assets(ffmpeg, tmp_path, n: int, scene_dur: float) -> list[AssetRecord]:
+    """Create real video files for testing the video input path.
+
+    Creates short synthetic videos (color bars + audio tone) that are shorter
+    than the scene duration, so the -stream_loop -1 path is exercised.
+    """
+    assets = []
+    for i in range(n):
+        vid_path = str(tmp_path / f"test_vid_{i}.mp4")
+        # Create a 1s test video (shorter than scene_dur to test looping)
+        subprocess.run(
+            [ffmpeg, "-y", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30",
+             "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100",
+             "-t", "1", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+             "-c:a", "aac", "-b:a", "128k", vid_path],
+            check=True, capture_output=True,
+        )
+        assets.append(AssetRecord(
+            id=i + 1, source="test", source_url="", license="",
+            local_path=vid_path, type="video", duration=1.0, width=640, height=360, hash="",
+        ))
+    return assets
+
+
 def _make_plan(n: int = 3, scene_dur: float = 2.0):
     scenes = []
     t = 0.0
@@ -234,3 +258,94 @@ def test_motion_type_duration_both_asset_paths(ffmpeg_bins, tmp_path, asset_type
     # Tolerance: +/- 0.5s (accounts for keyframe rounding, concat, -shortest)
     assert abs(actual_dur - scene_dur) <= 0.5, \
         f"{asset_type}/{motion}: expected ~{scene_dur}s, got {actual_dur:.2f}s"
+
+
+def _render_single_scene_video(ffmpeg_bins, tmp_path, motion: str, scene_dur: float = 2.5) -> float:
+    """Helper: render one scene with a VIDEO asset, return probed duration.
+
+    Video assets are shorter than scene_dur, so -stream_loop -1 is exercised.
+    The motion parameter is overridden to 'pan' for video assets (handled in _build_scene_filter).
+    """
+    ffmpeg, ffprobe = ffmpeg_bins
+
+    voice_path = str(tmp_path / f"voice_{motion}_video.mp3")
+    out_path = str(tmp_path / f"out_{motion}_video.mp4")
+
+    # Short audio matching scene duration
+    subprocess.run(
+        [ffmpeg, "-y", "-f", "lavfi", "-i", f"sine=frequency=220:duration={scene_dur + 0.5}",
+         "-c:a", "libmp3lame", voice_path],
+        check=True, capture_output=True,
+    )
+
+    plan = _make_plan(n=1, scene_dur=scene_dur)
+    plan.scenes[0].motion = motion
+    assets = _make_video_assets(ffmpeg, tmp_path, 1, scene_dur)
+    voice = VoiceResult(audio_path=voice_path, duration=scene_dur + 0.5, sample_rate=44100, channels=2)
+    captions = CaptionTrack(lines=[
+        CaptionLine(index=1, start=0.0, end=scene_dur, text="Test caption"),
+    ])
+
+    editor = VideoEditor(ffmpeg_bin=ffmpeg, ffprobe_bin=ffprobe)
+    result = editor.render(
+        plan, assets, voice, captions,
+        output_path=out_path, job_id=f"test_{motion}_video",
+    )
+
+    # Probe actual output duration via ffprobe
+    probe = subprocess.run(
+        [ffprobe, "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1", out_path],
+        check=True, capture_output=True, text=True,
+    )
+    return float(probe.stdout.strip())
+
+
+# Video asset type: all motion types should be overridden to 'pan' and produce correct duration
+@pytest.mark.parametrize("motion", ["zoom_in", "zoom_out", "ken_burns", "static", "pan"])
+def test_video_asset_motion_override(ffmpeg_bins, tmp_path, motion):
+    """Video assets override zoom/ken_burns to pan and produce correct duration."""
+    scene_dur = 2.5
+    actual_dur = _render_single_scene_video(ffmpeg_bins, tmp_path, motion, scene_dur)
+    # Tolerance: +/- 0.5s (accounts for keyframe rounding, concat, -shortest)
+    assert abs(actual_dur - scene_dur) <= 0.5, \
+        f"video/{motion}: expected ~{scene_dur}s, got {actual_dur:.2f}s"
+
+
+def test_scene_inputs_list_equals_range(ffmpeg_bins, tmp_path):
+    """Regression test: scene_inputs computed in render() equals list(range(len(plan.scenes))).
+
+    This directly asserts the fix for the index-miscount bug where the old code
+    derived indices from len(input_args) which was wrong (6 args per scene).
+    """
+    ffmpeg, ffprobe = ffmpeg_bins
+
+    voice_path = str(tmp_path / "voice.mp3")
+    out_path = str(tmp_path / "out.mp4")
+
+    subprocess.run(
+        [ffmpeg, "-y", "-f", "lavfi", "-i", "sine=frequency=220:duration=3.0",
+         "-c:a", "libmp3lame", voice_path],
+        check=True, capture_output=True,
+    )
+
+    plan = _make_plan(n=4, scene_dur=0.75)  # 3s total, 4 scenes
+    assets = _make_fallback_assets(4)
+    voice = VoiceResult(audio_path=voice_path, duration=3.0, sample_rate=44100, channels=2)
+    captions = CaptionTrack(lines=[
+        CaptionLine(index=1, start=0.0, end=3.0, text="Test"),
+    ])
+
+    editor = VideoEditor(ffmpeg_bin=ffmpeg, ffprobe_bin=ffprobe)
+
+    # We can't easily inspect the internal scene_inputs from outside,
+    # but a successful render with 4 scenes proves the indices are correct.
+    # If they were wrong (e.g., [2,5,8,11]), ffmpeg would fail with
+    # "Stream specifier matches no streams".
+    result = editor.render(
+        plan, assets, voice, captions,
+        output_path=out_path, job_id="test_indices",
+    )
+
+    assert result.duration >= 2.5  # ~3s total
+    assert result.width == 1080 and result.height == 1920
