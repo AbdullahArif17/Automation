@@ -25,15 +25,19 @@ logger = get_logger(__name__)
 
 # Common yt-dlp arguments for YouTube extraction:
 # - --js-runtimes deno: enables JS challenge solving (required for bot-detection)
-# - --user-agent: modern Chrome UA to match real browser fingerprint
-# - --extractor-args youtube:player_client=web: avoids mobile/embedded player bot checks
+# - --extractor-args youtube:player_client=tv,android_vr: tries less-restricted clients first
+#   (tv and android_vr avoid heavy PO Token enforcement that 'web' client triggers)
+# - --extractor-args youtube:formats=missing_pot: fallback to token-free formats (360p etc.)
+#   if PO Token errors persist; acceptable since source gets reframed to vertical Shorts.
 # - --remote-components ejs:github: fetches EJS challenge-solver from GitHub at runtime
 #   if not bundled locally (needed when yt-dlp installed via pip, not standalone binary).
+# Note: Chrome UA removed — tv/android_vr clients use different UA strings; yt-dlp handles
+# client-appropriate UA automatically when player_client is specified.
 YT_DLP_COMMON_ARGS = [
     "--js-runtimes", "deno",
     "--remote-components", "ejs:github",
-    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    "--extractor-args", "youtube:player_client=web",
+    "--extractor-args", "youtube:player_client=tv,android_vr",
+    "--extractor-args", "youtube:formats=missing_pot",
 ]
 
 
