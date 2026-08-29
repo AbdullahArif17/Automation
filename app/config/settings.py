@@ -92,7 +92,7 @@ class Settings:
     max_video_duration: int = field(default_factory=lambda: _env_int("MAX_VIDEO_DURATION", 60))
 
     # Providers
-    tts_provider: str = field(default_factory=lambda: os.getenv("TTS_PROVIDER", "local"))
+    tts_provider: str = field(default_factory=lambda: os.getenv("TTS_PROVIDER", "auto"))
     media_provider: str = field(default_factory=lambda: os.getenv("MEDIA_PROVIDER", "free"))
 
     # Free media API keys (optional - enables Pexels/Pixabay for better assets)

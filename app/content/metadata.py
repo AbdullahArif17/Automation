@@ -51,9 +51,12 @@ class MetadataGenerator:
         hashtags = [str(h).lower().replace(" ", "") for h in result.get("hashtags", [])[:8]]
         # Ensure # prefix
         hashtags = [h if h.startswith("#") else f"#{h}" for h in hashtags]
-        # Default tags if empty
-        if not hashtags:
-            hashtags = ["#ai", "#tech", "#programming", "#shorts"]
+        # Ensure #shorts is always present (required for Shorts shelf)
+        if "#shorts" not in hashtags:
+            hashtags.insert(0, "#shorts")
+        # Default tags only if LLM returned none at all
+        if not hashtags or hashtags == ["#shorts"]:
+            hashtags = ["#shorts", "#ai", "#tech", "#programming"]
 
         metadata = VideoMetadata(titles=titles, description=description, hashtags=hashtags)
         logger.info(f"generated metadata: {metadata.primary_title()}",

@@ -148,8 +148,11 @@ class Pipeline:
             voice_path = str(self.output_dir / f"voice_{job_id}.wav")
             voice = self.voice.synthesize(script.text, voice_path, job_id=jid)
 
-            # 6. Captions
-            captions: CaptionTrack = split_into_caption_lines(script.text, voice.duration)
+            # 6. Captions - use word boundaries if available (e.g., from edge-tts)
+            word_boundaries = self.voice.get_word_boundaries(script.text)
+            captions: CaptionTrack = split_into_caption_lines(
+                script.text, voice.duration, word_boundaries=word_boundaries
+            )
 
             # 7. Render
             self.db.set_job_state(job_id, JobState.RENDERING, stage="render")

@@ -1,14 +1,16 @@
-"""Local/free TTS providers.
+"""TTS providers - free/local and cloud-based.
 
-Abstraction so any TTS backend can be used. Defaults to:
-- Piper TTS (high quality, requires piper binary + voice model)
-- espeak-ng (lightweight, widely available)
-- MockProvider (zero-cost testing, no binary needed)
+Abstraction so any TTS backend can be used. Priority order:
+1. edge-tts (Microsoft Neural TTS, free, cloud-based, natural voices, word boundaries)
+2. Piper TTS (high quality, requires piper binary + voice model, local)
+3. espeak-ng (lightweight, widely available, robotic)
+4. MockProvider (zero-cost testing, no binary needed)
 
 Architecture allows paid APIs to be added later without rewrites.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shutil
@@ -45,6 +47,14 @@ class VoiceProvider(ABC):
     def is_available(self) -> bool:
         """Check if this provider can run (binary installed, model present)."""
         pass
+
+    def get_word_boundaries(self, text: str) -> list[dict]:
+        """Get word-level timestamps for caption karaoke sync.
+
+        Returns list of dicts with: text, offset (100ns units), duration (100ns units)
+        Default implementation returns empty list (no word boundaries available).
+        """
+        return []
 
 
 class MockVoiceProvider(VoiceProvider):
@@ -202,12 +212,134 @@ class PiperVoiceProvider(VoiceProvider):
             return 5.0
 
 
+class EdgeTTSVoiceProvider(VoiceProvider):
+    """Microsoft Edge TTS (edge-tts) - free cloud neural TTS with natural voices.
+
+    Advantages:
+    - Natural-sounding neural voices (en-US-ChristopherNeural, en-US-GuyNeural, etc.)
+    - Provides word-level timestamps for karaoke-style caption sync
+    - No local binary/model needed (just Python package + internet)
+    - Free tier generous (no API key needed)
+
+    Voice recommendations for AI/tech explainer content:
+    - en-US-ChristopherNeural: Male, News/Novel, "Reliable, Authority" - professional
+    - en-US-GuyNeural: Male, News/Novel, "Passion" - engaging
+    - en-US-AriaNeural: Female, News/Novel, "Positive, Confident" - clear
+    - en-US-AndrewNeural: Male, Conversation/Copilot, "Warm, Confident, Authentic" - conversational
+
+    Default: en-US-ChristopherNeural (authoritative for tech content)
+    """
+
+    DEFAULT_VOICE = "en-US-ChristopherNeural"
+    DEFAULT_RATE = "+0%"   # normal speed
+    DEFAULT_PITCH = "+0Hz" # normal pitch
+
+    def __init__(self, voice: str = DEFAULT_VOICE, rate: str = DEFAULT_RATE, pitch: str = DEFAULT_PITCH):
+        self.voice = voice
+        self.rate = rate
+        self.pitch = pitch
+        self._edge_tts_available = None
+
+    def is_available(self) -> bool:
+        """Check if edge-tts package is installed and we have network."""
+        if self._edge_tts_available is not None:
+            return self._edge_tts_available
+        try:
+            import edge_tts
+            self._edge_tts_available = True
+        except ImportError:
+            self._edge_tts_available = False
+        return self._edge_tts_available
+
+    def _get_word_boundaries(self, text: str) -> list[dict]:
+        """Extract word-level timestamps from edge-tts stream.
+
+        Returns list of dicts with: text, offset (100ns units), duration (100ns units)
+        """
+        import edge_tts
+        # boundary="WordBoundary" enables word-level timestamps in the metadata stream
+        communicate = edge_tts.Communicate(text, self.voice, rate=self.rate, pitch=self.pitch, boundary="WordBoundary")
+        word_boundaries = []
+
+        for chunk in communicate.stream_sync():
+            if chunk["type"] == "WordBoundary":
+                word_boundaries.append({
+                    "text": chunk["text"],
+                    "offset": chunk["offset"],      # 100-nanosecond units
+                    "duration": chunk["duration"],  # 100-nanosecond units
+                })
+        return word_boundaries
+
+    def synthesize(self, text: str, output_path: str, job_id: Optional[str] = None) -> VoiceResult:
+        if not self.is_available():
+            raise RuntimeError("edge-tts package not installed")
+
+        import edge_tts
+        # boundary="WordBoundary" enables word-level timestamps in the metadata stream
+        communicate = edge_tts.Communicate(text, self.voice, rate=self.rate, pitch=self.pitch, boundary="WordBoundary")
+
+        # Ensure output directory exists
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+        # Use asyncio to run the save
+        async def _save():
+            await communicate.save(output_path)
+
+        def _run():
+            asyncio.run(_save())
+            return True
+
+        retry(_run, max_attempts=2, retry_on=(Exception,))
+
+        # Probe duration from the saved file
+        duration = self._probe_duration(output_path)
+
+        # Also store word boundaries for caption sync (could be returned via VoiceResult extension)
+        # For now, we log them; the caption generator can re-query if needed
+        try:
+            word_boundaries = self._get_word_boundaries(text)
+            logger.debug(f"edge-tts word boundaries: {len(word_boundaries)} words",
+                         extra={"job_id": job_id, "stage": "voice", "status": "edge-tts"})
+        except Exception as exc:
+            logger.warning(f"Could not extract word boundaries: {exc}",
+                          extra={"job_id": job_id, "stage": "voice", "status": "edge-tts"})
+
+        logger.info(f"edge-tts voice: {duration:.1f}s -> {output_path}",
+                    extra={"job_id": job_id, "stage": "voice", "status": "edge-tts"})
+        return VoiceResult(output_path, duration, 24000, 1)  # edge-tts outputs 24kHz mono
+
+    def _probe_duration(self, path: str) -> float:
+        try:
+            # edge-tts outputs MP3, use ffprobe
+            import subprocess
+            cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                   "-of", "default=noprint_wrappers=1:nokey=1", path]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            return float(result.stdout.strip())
+        except Exception:
+            # Fallback: estimate from word count
+            return 5.0
+
+    def get_word_boundaries(self, text: str) -> list[dict]:
+        """Get word-level timestamps from edge-tts for karaoke captions."""
+        return self._get_word_boundaries(text)
+
+
 def get_voice_provider(preferred: str = "auto") -> VoiceProvider:
     """Factory: returns the best available provider.
 
-    preferred: "piper" | "espeak" | "mock" | "auto"
-    auto tries Piper -> espeak -> mock.
+    preferred: "edge-tts" | "piper" | "espeak" | "mock" | "auto"
+    auto tries edge-tts -> Piper -> espeak -> mock.
     """
+    # Edge-TTS is first priority (natural voices, word boundaries, no local deps)
+    if preferred in ("edge-tts", "auto"):
+        e = EdgeTTSVoiceProvider()
+        if e.is_available():
+            logger.info("using edge-tts TTS", extra={"stage": "voice", "status": "edge-tts"})
+            return e
+        if preferred == "edge-tts":
+            raise RuntimeError("edge-tts requested but not available")
+
     if preferred in ("piper", "auto", "local"):
         p = PiperVoiceProvider()
         if p.is_available():

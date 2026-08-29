@@ -6,7 +6,7 @@ import pytest
 
 from app.media.voice import (
     VoiceProvider, VoiceResult, MockVoiceProvider,
-    EspeakVoiceProvider, PiperVoiceProvider, get_voice_provider
+    EspeakVoiceProvider, PiperVoiceProvider, EdgeTTSVoiceProvider, get_voice_provider
 )
 
 
@@ -50,10 +50,10 @@ def test_piper_provider_availability():
 
 
 def test_get_voice_provider_auto_returns_mock():
-    # In CI/test environment, neither piper nor espeak likely available
-    # So auto should fall back to mock
+    # In CI/test environment, edge-tts is now available (installed via pip)
+    # So auto should pick edge-tts first, then Piper, then espeak, then mock
     provider = get_voice_provider("auto")
-    assert isinstance(provider, MockVoiceProvider) or isinstance(provider, (EspeakVoiceProvider, PiperVoiceProvider))
+    assert isinstance(provider, (EdgeTTSVoiceProvider, PiperVoiceProvider, EspeakVoiceProvider, MockVoiceProvider))
     assert provider.is_available()
 
 
