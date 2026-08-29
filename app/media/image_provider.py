@@ -78,7 +78,12 @@ class PexelsProvider:
         if not self.api_key:
             return []
         url = f"{self.BASE}/search?query={urllib.parse.quote(query)}&per_page={self.PER_PAGE}&orientation=portrait"
-        req = urllib.request.Request(url, headers={"Authorization": self.api_key})
+        # Realistic headers to avoid Cloudflare 403 (error 1010) - bare Python UA is blocked
+        req = urllib.request.Request(url, headers={
+            "Authorization": self.api_key,
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+        })
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 data = json.loads(resp.read().decode("utf-8"))

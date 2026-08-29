@@ -64,6 +64,9 @@ VIDEO_CRF = 23
 AUDIO_CODEC = "aac"
 AUDIO_BITRATE = "128k"
 
+# Crossfade transition duration between scenes (seconds)
+XFADE_DURATION = 0.4
+
 # ffmpeg subprocess timeout (seconds). Baseline render of a 5-scene zoompan
 # Short at CRF 23 on a 2-core GitHub runner: ~120-180s with -preset ultrafast.
 # 900s = 15 min gives 3-5x headroom for slower runners / longer videos.
@@ -150,9 +153,29 @@ class VideoEditor:
             vf = self._build_scene_filter(scene, asset, dur)
             filter_parts.append(f"[{inp}:v]{vf}[v{i}]")
 
-        # Concatenate video streams
-        concat_inputs = "".join(f"[v{i}]" for i in range(len(plan.scenes)))
-        filter_parts.append(f"{concat_inputs}concat=n={len(plan.scenes)}:v=1:a=0[video]")
+        # Crossfade transitions using xfade filter chain
+        # xfade overlaps clips by XFADE_DURATION, so we chain them:
+        # [v0][v1]xfade[vt0]; [vt0][v2]xfade[vt1]; ...
+        # Total output duration = sum(scene_durations) - (n_scenes - 1) * XFADE_DURATION
+        # For i-th xfade (1-indexed), offset = sum(d0..d{i-1}) - i * XFADE_DURATION
+        # This is the point in the PREVIOUS output where transition starts (end minus overlap)
+        if len(plan.scenes) == 1:
+            # Single scene: no transition needed
+            filter_parts.append("[v0]copy[video]")
+        else:
+            # Build xfade chain
+            prev_label = "v0"
+            for i in range(1, len(plan.scenes)):
+                out_label = f"vt{i-1}"
+                # offset = cumulative duration of first i scenes - i * XFADE_DURATION
+                # This is when the transition starts in the previous output
+                offset = sum(s.end - s.start for s in plan.scenes[:i]) - i * XFADE_DURATION
+                filter_parts.append(
+                    f"[{prev_label}][v{i}]xfade=transition=fade:duration={XFADE_DURATION}:offset={offset:.3f}[{out_label}]"
+                )
+                prev_label = out_label
+            # Final output
+            filter_parts.append(f"[{prev_label}]copy[video]")
 
         # Audio mixing
         audio_filter = f"[{voice_idx}:a]volume=1.0[voice]"

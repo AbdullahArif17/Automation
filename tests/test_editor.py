@@ -159,7 +159,7 @@ def test_render_multi_scene_end_to_end(ffmpeg_bins, tmp_path):
         check=True, capture_output=True,
     )
 
-    plan = _make_plan(n=3, scene_dur=2.0)  # 6s total
+    plan = _make_plan(n=3, scene_dur=2.0)  # 6s total, 2 crossfades = 5.2s expected
     assets = _make_fallback_assets(3)
     voice = VoiceResult(audio_path=voice_path, duration=6.5, sample_rate=44100, channels=2)
     captions = CaptionTrack(lines=[
@@ -178,8 +178,8 @@ def test_render_multi_scene_end_to_end(ffmpeg_bins, tmp_path):
     # Output sanity.
     assert os.path.getsize(out_path) > 1000
     assert result.width == 1080 and result.height == 1920
-    # -shortest ends at the 6s video concat.
-    assert 5.5 <= result.duration <= 6.5
+    # With 2 crossfades of 0.4s each: 6.0 - 0.8 = 5.2s expected duration
+    assert 5.0 <= result.duration <= 5.5
 
     # ffprobe confirms a real, playable file with video + audio streams.
     probe = subprocess.run(
@@ -191,7 +191,7 @@ def test_render_multi_scene_end_to_end(ffmpeg_bins, tmp_path):
     info = json.loads(probe.stdout)
     types = {s["codec_type"] for s in info["streams"]}
     assert "video" in types and "audio" in types
-    assert 5.5 <= float(info["format"]["duration"]) <= 6.5
+    assert 5.0 <= float(info["format"]["duration"]) <= 5.5
 
 
 def _render_single_scene(ffmpeg_bins, tmp_path, motion: str, scene_dur: float = 2.5,
@@ -329,7 +329,7 @@ def test_scene_inputs_list_equals_range(ffmpeg_bins, tmp_path):
         check=True, capture_output=True,
     )
 
-    plan = _make_plan(n=4, scene_dur=0.75)  # 3s total, 4 scenes
+    plan = _make_plan(n=4, scene_dur=0.75)  # 3s total, 4 scenes, 3 crossfades = 1.8s expected
     assets = _make_fallback_assets(4)
     voice = VoiceResult(audio_path=voice_path, duration=3.0, sample_rate=44100, channels=2)
     captions = CaptionTrack(lines=[
@@ -347,5 +347,6 @@ def test_scene_inputs_list_equals_range(ffmpeg_bins, tmp_path):
         output_path=out_path, job_id="test_indices",
     )
 
-    assert result.duration >= 2.5  # ~3s total
+    # 4 scenes × 0.75s = 3.0s, 3 crossfades × 0.4s = 1.2s overlap = 1.8s expected
+    assert 1.6 <= result.duration <= 2.0
     assert result.width == 1080 and result.height == 1920
