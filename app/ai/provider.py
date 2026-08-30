@@ -28,11 +28,15 @@ def extract_json(text: str) -> Any:
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
-        # Fall back to first balanced brace block.
-        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-        if match:
-            return json.loads(match.group(0))
-        raise ValueError("could not parse JSON from LLM response")
+        # Fall back to trying to parse from the first { to the last }
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            try:
+                return json.loads(cleaned[start:end+1])
+            except json.JSONDecodeError:
+                pass
+        raise ValueError(f"could not parse JSON from LLM response: {cleaned[:100]}...")
 
 
 class LLMProvider:
@@ -42,7 +46,12 @@ class LLMProvider:
         raise NotImplementedError
 
     def generate_json(self, prompt: str, temperature: float = 0.7) -> Any:
-        return extract_json(self.generate(prompt, temperature=temperature))
+        from app.utils.retry import retry
+        return retry(
+            lambda: extract_json(self.generate(prompt, temperature=temperature)),
+            max_attempts=3,
+            base_delay=2.0
+        )
 
 
 class MockProvider(LLMProvider):
