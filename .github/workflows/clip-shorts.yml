@@ -113,7 +113,7 @@ jobs:
       CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
       AUTO_UPLOAD: "true"
       AUTO_PUBLISH: "true"
-      TTS_PROVIDER: local
+      TTS_PROVIDER: edge-tts
       MEDIA_PROVIDER: free
       # Independent DB for clipped videos
       DATABASE_URL: sqlite:///data/clipper.db

@@ -37,7 +37,7 @@ jobs:
       MAX_DAILY_GENERATIONS: 2
       MAX_REGENERATION_ATTEMPTS: 1
       MIN_SCRIPT_QUALITY: 6.5
-      TTS_PROVIDER: local
+      TTS_PROVIDER: edge-tts
       MEDIA_PROVIDER: free
       DATABASE_URL: sqlite:///data/app.db
       # Optional free-tier media APIs for asset resilience (fallback chain)
