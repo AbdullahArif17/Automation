@@ -134,6 +134,7 @@ jobs:
       # YouTube channel mode
       CLIP_SOURCE_YT_CHANNEL_ID: ${{ secrets.CLIP_SOURCE_YT_CHANNEL_ID }}
       CLIP_SOURCE_YT_PLAYLIST_ID: ${{ secrets.CLIP_SOURCE_YT_PLAYLIST_ID }}
+      CLIP_SOURCE_YT_SEARCH_QUERY: ${{ secrets.CLIP_SOURCE_YT_SEARCH_QUERY }}
       # yt-dlp cookie auth: base64 secret decoded to cookies.txt by a prior step
       YT_COOKIES_B64: ${{ secrets.YT_COOKIES_B64 }}
       YT_COOKIES_PATH: ${{ github.workspace }}/cookies.txt

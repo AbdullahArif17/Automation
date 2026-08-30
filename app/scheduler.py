@@ -281,15 +281,20 @@ class DailyRunner:
 
 # --- cron / Task Scheduler installation --------------------------------------
 
-CRON_ENTRY = """# YouTube Shorts automation
+CRON_ENTRY = """# YouTube Shorts automation (Generative)
 # Runs at 06:00 and 18:00 local time (adjust as needed)
 0 6,18 * * * {python} -m app.scheduler run-once >> {log_file} 2>&1
+
+# YouTube Shorts automation (Clipping)
+# Runs at 07:00 and 19:00 local time
+0 7,19 * * * {python} -m app.clipper.__auto_main__ >> {log_file}_clipper 2>&1
 """
 
-WINDOWS_TASK = """schtasks /Create /TN "YouTubeShortsAuto" /TR "{python} -m app.scheduler run-once" /SC DAILY /ST 06:00 /F
-schtasks /Create /TN "YouTubeShortsAuto_Evening" /TR "{python} -m app.scheduler run-once" /SC DAILY /ST 18:00 /F
+WINDOWS_TASK = """schtasks /Create /TN "YouTubeShortsAuto_Gen" /TR "{python} -m app.scheduler run-once" /SC DAILY /ST 06:00 /F
+schtasks /Create /TN "YouTubeShortsAuto_Gen_Evening" /TR "{python} -m app.scheduler run-once" /SC DAILY /ST 18:00 /F
+schtasks /Create /TN "YouTubeShortsAuto_Clip" /TR "{python} -m app.clipper.__auto_main__" /SC DAILY /ST 07:00 /F
+schtasks /Create /TN "YouTubeShortsAuto_Clip_Evening" /TR "{python} -m app.clipper.__auto_main__" /SC DAILY /ST 19:00 /F
 """
-
 
 def install_cron(log_file: str | None = None) -> str:
     """Generate crontab entry. User must add to crontab manually."""
@@ -305,8 +310,10 @@ def install_windows_task() -> None:
     """Create Windows scheduled tasks (requires admin)."""
     py = sys.executable.replace("\\", "\\\\")
     cmds = [
-        f'schtasks /Create /TN "YouTubeShortsAuto" /TR "{py} -m app.scheduler run-once" /SC DAILY /ST 06:00 /F',
-        f'schtasks /Create /TN "YouTubeShortsAuto_Evening" /TR "{py} -m app.scheduler run-once" /SC DAILY /ST 18:00 /F',
+        f'schtasks /Create /TN "YouTubeShortsAuto_Gen" /TR "{py} -m app.scheduler run-once" /SC DAILY /ST 06:00 /F',
+        f'schtasks /Create /TN "YouTubeShortsAuto_Gen_Evening" /TR "{py} -m app.scheduler run-once" /SC DAILY /ST 18:00 /F',
+        f'schtasks /Create /TN "YouTubeShortsAuto_Clip" /TR "{py} -m app.clipper.__auto_main__" /SC DAILY /ST 07:00 /F',
+        f'schtasks /Create /TN "YouTubeShortsAuto_Clip_Evening" /TR "{py} -m app.clipper.__auto_main__" /SC DAILY /ST 19:00 /F',
     ]
     print("Run these commands as Administrator:")
     for c in cmds:
@@ -321,7 +328,12 @@ def install_windows_task() -> None:
 
 
 def uninstall_windows_task() -> None:
-    for name in ["YouTubeShortsAuto", "YouTubeShortsAuto_Evening"]:
+    tasks = [
+        "YouTubeShortsAuto", "YouTubeShortsAuto_Evening", 
+        "YouTubeShortsAuto_Gen", "YouTubeShortsAuto_Gen_Evening",
+        "YouTubeShortsAuto_Clip", "YouTubeShortsAuto_Clip_Evening"
+    ]
+    for name in tasks:
         subprocess.run(f'schtasks /Delete /TN "{name}" /F', shell=True, check=False)
 
 

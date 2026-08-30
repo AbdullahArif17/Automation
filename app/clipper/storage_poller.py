@@ -242,33 +242,53 @@ def list_new_videos_s3(
 
 def list_new_videos_youtube(
     db: Database,
-    channel_input: str,
+    channel_input: Optional[str] = None,
     playlist_id: Optional[str] = None,
+    search_query: Optional[str] = None,
     max_videos: int = 50,
 ) -> list[SourceVideo]:
-    """List new long-form videos from your YouTube channel."""
+    """List new long-form videos from a YouTube channel or search query."""
     # Load already-processed YouTube video IDs
     processed = set()
     for row in db.fetchall("SELECT source_etag FROM videos WHERE source_type='clipped' AND source_etag IS NOT NULL"):
         processed.add(row["source_etag"])
 
-    channel_id = _resolve_channel_id(channel_input)
+    items_to_process = []
+    
+    if search_query:
+        # Fetch search results
+        data = _youtube_api_request("search", {
+            "part": "snippet",
+            "q": search_query,
+            "type": "video",
+            "maxResults": min(max_videos * 3, 50),
+        })
+        items_to_process = data.get("items", [])
+    elif channel_input:
+        channel_id = _resolve_channel_id(channel_input)
+        if not playlist_id:
+            playlist_id = _get_uploads_playlist_id(channel_id)
 
-    if not playlist_id:
-        playlist_id = _get_uploads_playlist_id(channel_id)
-
-    # Fetch playlist items (newest first)
-    data = _youtube_api_request("playlistItems", {
-        "part": "snippet,contentDetails",
-        "playlistId": playlist_id,
-        "maxResults": min(max_videos * 3, 50),  # fetch extra to filter shorts
-    })
+        # Fetch playlist items (newest first)
+        data = _youtube_api_request("playlistItems", {
+            "part": "snippet,contentDetails",
+            "playlistId": playlist_id,
+            "maxResults": min(max_videos * 3, 50),  # fetch extra to filter shorts
+        })
+        items_to_process = data.get("items", [])
+    else:
+        raise RuntimeError("Must provide either channel_input or search_query")
 
     new_videos: list[SourceVideo] = []
-    for item in data.get("items", []):
+    for item in items_to_process:
         snippet = item.get("snippet", {})
-        content = item.get("contentDetails", {})
-        yt_video_id = content.get("videoId", "")
+        
+        # Depending on if it's from search or playlistItems, videoId is in different places
+        if search_query:
+            yt_video_id = item.get("id", {}).get("videoId", "")
+        else:
+            yt_video_id = item.get("contentDetails", {}).get("videoId", "")
+
         if not yt_video_id or yt_video_id in processed:
             continue
 
@@ -429,10 +449,10 @@ def poll_and_clip(
     if not source_mode:
         if os.getenv("CLIP_SOURCE_S3_BUCKET"):
             source_mode = "s3"
-        elif os.getenv("CLIP_SOURCE_YT_CHANNEL_ID"):
+        elif os.getenv("CLIP_SOURCE_YT_CHANNEL_ID") or os.getenv("CLIP_SOURCE_YT_SEARCH_QUERY"):
             source_mode = "youtube"
         else:
-            raise RuntimeError("No clip source configured. Set CLIP_SOURCE_S3_BUCKET or CLIP_SOURCE_YT_CHANNEL_ID")
+            raise RuntimeError("No clip source configured. Set CLIP_SOURCE_S3_BUCKET, CLIP_SOURCE_YT_CHANNEL_ID, or CLIP_SOURCE_YT_SEARCH_QUERY")
 
     if source_mode == "s3":
         bucket = os.getenv("CLIP_SOURCE_S3_BUCKET")
@@ -442,7 +462,8 @@ def poll_and_clip(
     elif source_mode == "youtube":
         channel_id = os.getenv("CLIP_SOURCE_YT_CHANNEL_ID")
         playlist_id = os.getenv("CLIP_SOURCE_YT_PLAYLIST_ID")
-        new_videos = list_new_videos_youtube(db, channel_id, playlist_id, max_videos=max_videos_per_run)
+        search_query = os.getenv("CLIP_SOURCE_YT_SEARCH_QUERY")
+        new_videos = list_new_videos_youtube(db, channel_input=channel_id, playlist_id=playlist_id, search_query=search_query, max_videos=max_videos_per_run)
         download_fn = download_video_youtube
     else:
         raise RuntimeError(f"Unknown CLIP_SOURCE_MODE: {source_mode} (must be 's3' or 'youtube')")
