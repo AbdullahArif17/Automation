@@ -322,7 +322,7 @@ def list_new_videos_youtube(
             size_bytes=0,  # unknown until download
             etag=yt_video_id,  # use video ID as de-dup key
             yt_video_id=yt_video_id,
-            yt_channel_id=channel_id,
+            yt_channel_id=v["snippet"].get("channelId", ""),
         ))
         if len(new_videos) >= max_videos:
             break
