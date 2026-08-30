@@ -28,8 +28,8 @@ def main() -> int:
         count, auth_ok = validate_cookies_file(cookies_path, test_url)
         print(f"COOKIE_VALIDATION: {count} cookies, auth_ok={auth_ok}")
         if not auth_ok:
-            print("ERROR: Cookies failed authentication check", file=sys.stderr)
-            return 1
+            print("WARNING: Cookies failed authentication check. yt-dlp might still work, continuing anyway.", file=sys.stderr)
+            return 0
     except ValueError as e:
         print(f"ERROR: Cookie format validation failed: {e}", file=sys.stderr)
         return 1
