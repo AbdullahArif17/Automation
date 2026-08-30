@@ -147,11 +147,16 @@ class VideoEditor:
             input_args.extend(["-stream_loop", "-1", "-i", music_path])
 
         # Build per-scene filters
+        # Append fps=VIDEO_FPS to every scene's output so all scenes
+        # share a consistent timebase before entering the xfade chain.
+        # Without this, zoompan-based motions produce a different
+        # internal timebase (e.g. 1/15360) than scale/crop (1/30),
+        # causing xfade to fail with a timebase mismatch error.
         for i, (scene, asset) in enumerate(zip(plan.scenes, scene_assets)):
             inp = scene_inputs[i]
             dur = scene.end - scene.start
             vf = self._build_scene_filter(scene, asset, dur)
-            filter_parts.append(f"[{inp}:v]{vf}[v{i}]")
+            filter_parts.append(f"[{inp}:v]{vf},fps={VIDEO_FPS}[v{i}]")
 
         # Crossfade transitions using xfade filter chain
         # xfade overlaps clips by XFADE_DURATION, so we chain them:

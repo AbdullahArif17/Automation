@@ -350,3 +350,63 @@ def test_scene_inputs_list_equals_range(ffmpeg_bins, tmp_path):
     # 4 scenes × 0.75s = 3.0s, 3 crossfades × 0.4s = 1.2s overlap = 1.8s expected
     assert 1.6 <= result.duration <= 2.0
     assert result.width == 1080 and result.height == 1920
+
+
+def test_mixed_motion_types_timebase_normalization(ffmpeg_bins, tmp_path):
+    """Regression test: adjacent scenes with DIFFERENT motion types must not
+    cause xfade timebase mismatch.
+
+    Bug: zoompan-based motions (zoom_in, zoom_out, ken_burns) produce
+    a different internal timebase (1/15360) than scale/crop chains
+    (static, pan). xfade requires matching timebases on both inputs.
+    This test uses a sequence of genuinely DIFFERENT motion types
+    (not uniform across all scenes) to catch the timebase mismatch.
+    """
+    ffmpeg, ffprobe = ffmpeg_bins
+
+    voice_path = str(tmp_path / "voice.mp3")
+    out_path = str(tmp_path / "out.mp4")
+
+    # 4 scenes with mixed motion types: zoom_in -> pan -> static -> ken_burns
+    scene_dur = 2.0
+    plan = VisualPlan(duration=4 * scene_dur, scenes=[
+        Scene(start=0.0, end=scene_dur, visual_query="q0", visual_type="image", motion="zoom_in"),
+        Scene(start=scene_dur, end=2*scene_dur, visual_query="q1", visual_type="image", motion="pan"),
+        Scene(start=2*scene_dur, end=3*scene_dur, visual_query="q2", visual_type="image", motion="static"),
+        Scene(start=3*scene_dur, end=4*scene_dur, visual_query="q3", visual_type="image", motion="ken_burns"),
+    ])
+    assets = _make_fallback_assets(4)
+
+    # Short audio matching total duration
+    subprocess.run(
+        [ffmpeg, "-y", "-f", "lavfi", "-i", f"sine=frequency=220:duration={4*scene_dur + 0.5}",
+         "-c:a", "libmp3lame", voice_path],
+        check=True, capture_output=True,
+    )
+
+    voice = VoiceResult(audio_path=voice_path, duration=4*scene_dur + 0.5, sample_rate=44100, channels=2)
+    captions = CaptionTrack(lines=[
+        CaptionLine(index=1, start=0.0, end=4*scene_dur, text="Mixed motion test"),
+    ])
+
+    editor = VideoEditor(ffmpeg_bin=ffmpeg, ffprobe_bin=ffprobe)
+    result = editor.render(
+        plan, assets, voice, captions,
+        output_path=out_path, job_id="test_mixed_motion",
+    )
+
+    # 4 scenes × 2.0s = 8.0s, 3 crossfades × 0.4s = 1.2s overlap = 6.8s expected
+    assert 6.5 <= result.duration <= 7.0, f"expected ~6.8s, got {result.duration:.2f}s"
+    assert result.width == 1080 and result.height == 1920
+
+    # ffprobe confirms valid output
+    probe = subprocess.run(
+        [ffprobe, "-v", "error", "-show_entries",
+         "format=duration:stream=codec_type", "-of", "json", out_path],
+        check=True, capture_output=True, text=True,
+    )
+    import json
+    info = json.loads(probe.stdout)
+    types = {s["codec_type"] for s in info["streams"]}
+    assert "video" in types and "audio" in types
+    assert 6.5 <= float(info["format"]["duration"]) <= 7.0
