@@ -134,6 +134,8 @@ class VideoEditor:
         # Scene inputs
         for i, (scene, asset) in enumerate(zip(plan.scenes, scene_assets)):
             dur = scene.end - scene.start
+            if i < len(plan.scenes) - 1:
+                dur += XFADE_DURATION
             input_args.extend(_build_scene_input_args(asset, dur))
 
         # Voice input
@@ -155,15 +157,12 @@ class VideoEditor:
         for i, (scene, asset) in enumerate(zip(plan.scenes, scene_assets)):
             inp = scene_inputs[i]
             dur = scene.end - scene.start
+            if i < len(plan.scenes) - 1:
+                dur += XFADE_DURATION
             vf = self._build_scene_filter(scene, asset, dur)
             filter_parts.append(f"[{inp}:v]{vf},fps={VIDEO_FPS}[v{i}]")
 
         # Crossfade transitions using xfade filter chain
-        # xfade overlaps clips by XFADE_DURATION, so we chain them:
-        # [v0][v1]xfade[vt0]; [vt0][v2]xfade[vt1]; ...
-        # Total output duration = sum(scene_durations) - (n_scenes - 1) * XFADE_DURATION
-        # For i-th xfade (1-indexed), offset = sum(d0..d{i-1}) - i * XFADE_DURATION
-        # This is the point in the PREVIOUS output where transition starts (end minus overlap)
         if len(plan.scenes) == 1:
             # Single scene: no transition needed
             filter_parts.append("[v0]copy[video]")
@@ -172,9 +171,9 @@ class VideoEditor:
             prev_label = "v0"
             for i in range(1, len(plan.scenes)):
                 out_label = f"vt{i-1}"
-                # offset = cumulative duration of first i scenes - i * XFADE_DURATION
-                # This is when the transition starts in the previous output
-                offset = sum(s.end - s.start for s in plan.scenes[:i]) - i * XFADE_DURATION
+                # Since we padded previous scenes by XFADE_DURATION, the transition
+                # starts exactly at the sum of original scene durations.
+                offset = sum(s.end - s.start for s in plan.scenes[:i])
                 filter_parts.append(
                     f"[{prev_label}][v{i}]xfade=transition=fade:duration={XFADE_DURATION}:offset={offset:.3f}[{out_label}]"
                 )

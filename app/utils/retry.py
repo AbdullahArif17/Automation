@@ -15,8 +15,6 @@ DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_BASE_DELAY = 1.0
 
 
-class RetryError(Exception):
-    pass
 
 
 def retry(
@@ -46,4 +44,6 @@ def retry(
                 extra={"stage": "retry", "status": "retry", "error": str(exc)},
             )
             time.sleep(delay)
-    raise RetryError(f"failed after {max_attempts} attempts: {last_exc}") from last_exc
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("retry failed with no exception")

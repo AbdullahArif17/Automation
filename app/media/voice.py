@@ -10,7 +10,7 @@ Architecture allows paid APIs to be added later without rewrites.
 """
 from __future__ import annotations
 
-import asyncio
+
 import json
 import os
 import shutil
@@ -281,12 +281,20 @@ class EdgeTTSVoiceProvider(VoiceProvider):
         # Ensure output directory exists
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-        # Use asyncio to run the save
-        async def _save():
-            await communicate.save(output_path)
+        word_boundaries = []
 
         def _run():
-            asyncio.run(_save())
+            word_boundaries.clear()
+            with open(output_path, "wb") as f:
+                for chunk in communicate.stream_sync():
+                    if chunk["type"] == "audio":
+                        f.write(chunk["data"])
+                    elif chunk["type"] == "WordBoundary":
+                        word_boundaries.append({
+                            "text": chunk["text"],
+                            "offset": chunk["offset"],
+                            "duration": chunk["duration"],
+                        })
             return True
 
         retry(_run, max_attempts=2, retry_on=(Exception,))
@@ -294,15 +302,13 @@ class EdgeTTSVoiceProvider(VoiceProvider):
         # Probe duration from the saved file
         duration = self._probe_duration(output_path)
 
-        # Also store word boundaries for caption sync (could be returned via VoiceResult extension)
-        # For now, we log them; the caption generator can re-query if needed
-        try:
-            word_boundaries = self._get_word_boundaries(text)
+        # Log word boundaries
+        if word_boundaries:
             logger.debug(f"edge-tts word boundaries: {len(word_boundaries)} words",
                          extra={"job_id": job_id, "stage": "voice", "status": "edge-tts"})
-        except Exception as exc:
-            logger.warning(f"Could not extract word boundaries: {exc}",
-                          extra={"job_id": job_id, "stage": "voice", "status": "edge-tts"})
+        else:
+            logger.warning("Could not extract word boundaries",
+                           extra={"job_id": job_id, "stage": "voice", "status": "edge-tts"})
 
         logger.info(f"edge-tts voice: {duration:.1f}s -> {output_path}",
                     extra={"job_id": job_id, "stage": "voice", "status": "edge-tts"})

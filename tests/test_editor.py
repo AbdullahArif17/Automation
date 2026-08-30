@@ -178,8 +178,8 @@ def test_render_multi_scene_end_to_end(ffmpeg_bins, tmp_path):
     # Output sanity.
     assert os.path.getsize(out_path) > 1000
     assert result.width == 1080 and result.height == 1920
-    # With 2 crossfades of 0.4s each: 6.0 - 0.8 = 5.2s expected duration
-    assert 5.0 <= result.duration <= 5.5
+    # Overlap is now compensated: duration matches the plan (6.0s) + potentially a bit of audio trailing
+    assert 5.9 <= result.duration <= 6.5
 
     # ffprobe confirms a real, playable file with video + audio streams.
     probe = subprocess.run(
@@ -191,7 +191,7 @@ def test_render_multi_scene_end_to_end(ffmpeg_bins, tmp_path):
     info = json.loads(probe.stdout)
     types = {s["codec_type"] for s in info["streams"]}
     assert "video" in types and "audio" in types
-    assert 5.0 <= float(info["format"]["duration"]) <= 5.5
+    assert 5.9 <= float(info["format"]["duration"]) <= 6.5
 
 
 def _render_single_scene(ffmpeg_bins, tmp_path, motion: str, scene_dur: float = 2.5,
@@ -347,8 +347,8 @@ def test_scene_inputs_list_equals_range(ffmpeg_bins, tmp_path):
         output_path=out_path, job_id="test_indices",
     )
 
-    # 4 scenes × 0.75s = 3.0s, 3 crossfades × 0.4s = 1.2s overlap = 1.8s expected
-    assert 1.6 <= result.duration <= 2.0
+    # 4 scenes * 0.75s = 3.0s (overlap compensated)
+    assert 2.9 <= result.duration <= 3.5
     assert result.width == 1080 and result.height == 1920
 
 
@@ -395,8 +395,8 @@ def test_mixed_motion_types_timebase_normalization(ffmpeg_bins, tmp_path):
         output_path=out_path, job_id="test_mixed_motion",
     )
 
-    # 4 scenes × 2.0s = 8.0s, 3 crossfades × 0.4s = 1.2s overlap = 6.8s expected
-    assert 6.5 <= result.duration <= 7.0, f"expected ~6.8s, got {result.duration:.2f}s"
+    # 4 scenes * 2.0s = 8.0s (overlap compensated)
+    assert 7.9 <= result.duration <= 8.5, f"expected ~8.0s, got {result.duration:.2f}s"
     assert result.width == 1080 and result.height == 1920
 
     # ffprobe confirms valid output
@@ -409,4 +409,4 @@ def test_mixed_motion_types_timebase_normalization(ffmpeg_bins, tmp_path):
     info = json.loads(probe.stdout)
     types = {s["codec_type"] for s in info["streams"]}
     assert "video" in types and "audio" in types
-    assert 6.5 <= float(info["format"]["duration"]) <= 7.0
+    assert 7.9 <= float(info["format"]["duration"]) <= 8.5
