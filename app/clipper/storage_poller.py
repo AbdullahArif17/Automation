@@ -34,10 +34,11 @@ logger = get_logger(__name__)
 #   if not bundled locally (needed when yt-dlp installed via pip, not standalone binary).
 # Note: Chrome UA removed — tv/android_vr clients use different UA strings; yt-dlp handles
 # client-appropriate UA automatically when player_client is specified.
+# Note: Using android and web clients because android_vr and tv often reject cookies.
 YT_DLP_COMMON_ARGS = [
     "--js-runtimes", "deno",
     "--remote-components", "ejs:github",
-    "--extractor-args", "youtube:player_client=tv,android_vr;formats=missing_pot",
+    "--extractor-args", "youtube:player_client=android,web;formats=missing_pot",
 ]
 
 
@@ -375,10 +376,9 @@ def download_video_youtube(source: SourceVideo, dest_dir: Path) -> Path:
         raise RuntimeError(f"Cookie validation failed: {exc}") from exc
 
     if not auth_ok:
-        raise RuntimeError(
+        logger.warning(
             f"Cookies failed authentication check for {video_url} "
-            f"({cookie_count} cookies loaded but yt-dlp could not verify session). "
-            f"Re-export cookies.txt from a logged-in YouTube session and update YT_COOKIES_B64 secret."
+            f"({cookie_count} cookies loaded). yt-dlp might fail with bot detection."
         )
 
     dest_dir.mkdir(parents=True, exist_ok=True)
