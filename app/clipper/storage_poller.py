@@ -96,8 +96,9 @@ def validate_cookies_file(cookies_path: Path, test_url: str = "https://www.youtu
     try:
         result = subprocess.run(
             ["yt-dlp", *YT_DLP_COMMON_ARGS, "--cookies", str(cookies_path), "--skip-download",
+             "--playlist-items", "1",
              "--print", "id", test_url],
-            capture_output=True, text=True, timeout=30
+            capture_output=True, text=True, timeout=60
         )
         if result.returncode == 0 and result.stdout.strip():
             auth_ok = True
@@ -105,7 +106,7 @@ def validate_cookies_file(cookies_path: Path, test_url: str = "https://www.youtu
         else:
             logger.warning(f"Cookie auth check failed: yt-dlp returned {result.returncode}, stderr={result.stderr[:200]}")
     except subprocess.TimeoutExpired:
-        logger.warning("Cookie auth check timed out (30s)")
+        logger.warning("Cookie auth check timed out (60s)")
     except Exception as exc:
         logger.warning(f"Cookie auth check error: {exc}")
 
