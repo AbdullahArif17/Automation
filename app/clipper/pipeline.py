@@ -147,18 +147,18 @@ class ClipperPipeline:
                 clip_outcome = ClipOutcome(candidate=candidate)
 
                 try:
-                    # Cut segment
-                    clip_filename = f"{source.stem}_clip_{idx+1}.mp4"
-                    clip_path = str(self.output_dir / clip_filename)
-
-                    cut_result = cut_segment(source_path, candidate, clip_path, job_id=jid)
-                    clip_outcome.cut_result = cut_result
-
-                    # Generate captions from whisper timestamps
+                    # Generate captions from whisper timestamps FIRST
                     self.db.set_job_state(job_db_id, JobState.VOICE_GENERATION, stage=f"caption_{idx+1}")
                     caption_base = str(self.output_dir / f"{source.stem}_clip_{idx+1}")
                     caption_result = generate_clip_captions(transcript, candidate, caption_base)
                     clip_outcome.caption_result = caption_result
+
+                    # Cut segment and burn subtitles
+                    clip_filename = f"{source.stem}_clip_{idx+1}.mp4"
+                    clip_path = str(self.output_dir / clip_filename)
+
+                    cut_result = cut_segment(source_path, candidate, clip_path, job_id=jid, ass_path=caption_result.ass_path)
+                    clip_outcome.cut_result = cut_result
 
                     # Quality check
                     self.db.set_job_state(job_db_id, JobState.QUALITY_CHECK, stage=f"quality_{idx+1}")

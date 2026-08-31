@@ -96,6 +96,7 @@ def cut_segment(
     output_path: str,
     crop_mode: Optional[str] = None,
     job_id: Optional[str] = None,
+    ass_path: Optional[str] = None,
 ) -> CutResult:
     """Cut a segment from source video with accurate seeking and 9:16 reframe.
 
@@ -108,6 +109,7 @@ def cut_segment(
         output_path: Where to write the clipped video.
         crop_mode: 'center' (default from settings) or other future modes.
         job_id: Job ID for logging.
+        ass_path: Optional path to .ass subtitle file to burn into video.
 
     Returns:
         CutResult with output path and metadata.
@@ -132,13 +134,17 @@ def cut_segment(
 
     # Build filter chain
     crop_filter = build_crop_filter(crop_mode, src_w, src_h, target_w, target_h)
+    
+    if ass_path:
+        safe_ass = str(Path(ass_path).absolute()).replace("\\", "/").replace(":", "\\:")
+        crop_filter += f",subtitles='{safe_ass}'"
 
     # ffmpeg command:
     # -ss before -i: fast seek to nearest keyframe before start
     # -ss after -i: accurate seek from keyframe to exact start (re-encodes)
     # -t: duration
     # -vf: crop/scale to 9:16
-    # -c:v libx264 -preset fast -crf 23: re-encode video
+    # -c:v libx264 -preset fast -crf 18: re-encode video (High quality)
     # -c:a aac -b:a 128k: re-encode audio
     cmd = [
         "ffmpeg", "-y",
@@ -147,7 +153,7 @@ def cut_segment(
         "-ss", "0",  # accurate seek from keyframe (after -i, offset 0 since we already seeked)
         "-t", str(duration),
         "-vf", crop_filter,
-        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
         "-r", "30",
         "-c:a", "aac", "-b:a", "128k",
         "-avoid_negative_ts", "make_zero",
