@@ -38,7 +38,7 @@ logger = get_logger(__name__)
 YT_DLP_COMMON_ARGS = [
     "--js-runtimes", "deno",
     "--remote-components", "ejs:github",
-    "--extractor-args", "youtube:player_client=android,web;formats=missing_pot",
+    "--extractor-args", "youtube:player_client=android,web",
 ]
 
 
@@ -263,7 +263,7 @@ def list_new_videos_youtube(
             "part": "snippet",
             "q": search_query,
             "type": "video",
-            "maxResults": min(max_videos * 3, 50),
+            "maxResults": 50,
         })
         items_to_process = data.get("items", [])
     elif channel_input:
@@ -275,7 +275,7 @@ def list_new_videos_youtube(
         data = _youtube_api_request("playlistItems", {
             "part": "snippet,contentDetails",
             "playlistId": playlist_id,
-            "maxResults": min(max_videos * 3, 50),  # fetch extra to filter shorts
+            "maxResults": 50,  
         })
         items_to_process = data.get("items", [])
     else:
@@ -351,35 +351,22 @@ def download_video_youtube(source: SourceVideo, dest_dir: Path) -> Path:
     import subprocess
 
     cookies_path_str = os.getenv("YT_COOKIES_PATH")
-    if not cookies_path_str or not Path(cookies_path_str).exists():
-        raise RuntimeError(
-            "YT_COOKIES_PATH not set or file missing. The CI workflow must decode "
-            "YT_COOKIES_B64 secret to cookies.txt before running. Export cookies.txt "
-            "from a logged-in YouTube session (e.g. via 'Get cookies.txt LOCALLY' "
-            "browser extension), base64-encode it, store as YT_COOKIES_B64 repo secret."
-        )
+    has_cookies = cookies_path_str and Path(cookies_path_str).exists()
 
-    cookies_path = Path(cookies_path_str)
-
-    # Build the actual video URL we're about to download — this is the
-    # exact operation being gated, so testing against it directly proves
-    # the cookies work for the real use case (avoids "Sign in to confirm
-    # you're not a bot" on the actual download).
     video_url = f"https://www.youtube.com/watch?v={source.yt_video_id}"
 
-    # Validate cookies file format and verify they actually authenticate
-    # This catches malformed exports (wrong field count, CRLF issues) and
-    # expired cookies before wasting time on download attempts.
-    try:
-        cookie_count, auth_ok = validate_cookies_file(cookies_path, test_url=video_url)
-    except ValueError as exc:
-        raise RuntimeError(f"Cookie validation failed: {exc}") from exc
-
-    if not auth_ok:
-        logger.warning(
-            f"Cookies failed authentication check for {video_url} "
-            f"({cookie_count} cookies loaded). yt-dlp might fail with bot detection."
-        )
+    if has_cookies:
+        cookies_path = Path(cookies_path_str)
+        try:
+            cookie_count, auth_ok = validate_cookies_file(cookies_path, test_url=video_url)
+            if not auth_ok:
+                logger.warning(
+                    f"Cookies failed authentication check for {video_url} "
+                    f"({cookie_count} cookies loaded). yt-dlp might fail with bot detection."
+                )
+        except ValueError as exc:
+            logger.warning(f"Cookie validation failed, proceeding without them: {exc}")
+            has_cookies = False
 
     dest_dir.mkdir(parents=True, exist_ok=True)
     local_path = dest_dir / f"{source.yt_video_id}.mp4"
@@ -387,11 +374,16 @@ def download_video_youtube(source: SourceVideo, dest_dir: Path) -> Path:
     cmd = [
         "yt-dlp",
         *YT_DLP_COMMON_ARGS,
-        "--cookies", cookies_path_str,
         "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "-o", str(local_path),
-        f"https://www.youtube.com/watch?v={source.yt_video_id}",
+        video_url,
     ]
+
+    if has_cookies:
+        # Insert cookies args right after YT_DLP_COMMON_ARGS
+        insert_idx = 1 + len(YT_DLP_COMMON_ARGS)
+        cmd.insert(insert_idx, "--cookies")
+        cmd.insert(insert_idx + 1, cookies_path_str)
 
     # Retry on bot-detection (transient), capped at 2 attempts
     last_err = ""
@@ -464,6 +456,14 @@ def poll_and_clip(
         channel_id = os.getenv("CLIP_SOURCE_YT_CHANNEL_ID")
         playlist_id = os.getenv("CLIP_SOURCE_YT_PLAYLIST_ID")
         search_query = os.getenv("CLIP_SOURCE_YT_SEARCH_QUERY")
+
+        if search_query and "|" in search_query:
+            import random
+            queries = [q.strip() for q in search_query.split("|") if q.strip()]
+            if queries:
+                search_query = random.choice(queries)
+                logger.info(f"Multiple topics found in env. Randomly selected query: '{search_query}'")
+
         new_videos = list_new_videos_youtube(db, channel_input=channel_id, playlist_id=playlist_id, search_query=search_query, max_videos=max_videos_per_run)
         download_fn = download_video_youtube
     else:

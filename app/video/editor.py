@@ -59,8 +59,8 @@ VIDEO_CODEC = "libx264"
 # ultrafast: ~2-3x faster than "fast" on constrained CI hardware (2-core runners).
 # Shorts are already heavily compressed for mobile; preset choice affects file
 # size/encode-time tradeoff, not visual quality at a fixed CRF.
-VIDEO_PRESET = "ultrafast"
-VIDEO_CRF = 23
+VIDEO_PRESET = "fast"
+VIDEO_CRF = 18
 AUDIO_CODEC = "aac"
 AUDIO_BITRATE = "128k"
 
