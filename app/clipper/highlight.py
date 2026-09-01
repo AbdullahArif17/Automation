@@ -27,6 +27,7 @@ class ClipCandidate:
     suggested_title: str
     suggested_description: str
     confidence: float  # 0-1, model's confidence this will work as a Short
+    crop_mode: str = "center"  # 'center' or 'blur'
 
     @property
     def duration(self) -> float:
@@ -41,6 +42,7 @@ class ClipCandidate:
             "suggested_title": self.suggested_title,
             "suggested_description": self.suggested_description,
             "confidence": self.confidence,
+            "crop_mode": self.crop_mode,
         }
 
 
@@ -69,7 +71,8 @@ Return ONLY valid JSON matching this exact schema:
       "reason": "<why this segment works as a standalone Short>",
       "suggested_title": "<highly optimized SEO title, curiosity gap hook, max 60 chars>",
       "suggested_description": "<2 sentences heavily packed with high-volume search keywords + 'Subscribe for more!' + 4 highly specific #hashtags + #shorts>",
-      "confidence": <0.0-1.0>
+      "confidence": <0.0-1.0>,
+      "crop_mode": "<'center' or 'blur'>"
     }}
   ]
 }}
@@ -81,6 +84,7 @@ Rules:
 - Reject segments that need context from earlier/later parts
 - For suggested_title: Use click-worthy hooks ("The truth about...", "Why...") and front-load keywords. MUST be under 60 chars.
 - For suggested_description: Front-load high-search keywords, end with Subscribe CTA and exactly 5 hashtags (including #shorts).
+- For crop_mode: Choose 'center' for immersive full-screen (best for football, podcasts, centered subjects). Choose 'blur' if it's gaming, UI-heavy, or you suspect the subject is on the edge of the screen, as this preserves the entire 16:9 frame.
 - confidence: your estimate of how well this will perform as a Short
 - Return 1-3 candidates, best first
 """
@@ -124,6 +128,10 @@ def parse_highlight_response(response: str, min_dur: float, max_dur: float, vide
             logger.warning(f"candidate timestamps [{start}, {end}] outside video duration {video_duration}, skipping",
                            extra={"stage": "highlight", "status": "validation_fail"})
             continue
+            
+        c_mode = c.get("crop_mode", "center")
+        if c_mode not in ("center", "blur"):
+            c_mode = "center"
 
         candidates.append(ClipCandidate(
             start_seconds=start,
@@ -132,6 +140,7 @@ def parse_highlight_response(response: str, min_dur: float, max_dur: float, vide
             suggested_title=c["suggested_title"][:100],
             suggested_description=c["suggested_description"][:5000],
             confidence=float(c["confidence"]),
+            crop_mode=c_mode,
         ))
 
     if not candidates:
