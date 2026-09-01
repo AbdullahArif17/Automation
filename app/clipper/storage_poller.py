@@ -471,6 +471,7 @@ def poll_and_clip(
 
     results = []
     for src in new_videos:
+        local_path = None
         try:
             local_path = download_fn(src, Path(pipeline.settings.clip_input_dir))
             pipeline.run(
@@ -489,5 +490,12 @@ def poll_and_clip(
         except Exception as exc:
             logger.error(f"clipper failed for {src.video_id}: {exc}")
             results.append((src, False, str(exc)))
+        finally:
+            if local_path and local_path.exists():
+                try:
+                    local_path.unlink()
+                    logger.info(f"cleaned up source video: {local_path}")
+                except Exception as e:
+                    logger.warning(f"failed to clean up source video {local_path}: {e}")
 
     return results
