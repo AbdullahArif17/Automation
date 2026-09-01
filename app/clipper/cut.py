@@ -59,14 +59,24 @@ def build_crop_filter(crop_mode: str, src_w: int, src_h: int, target_w: int = 10
     """Build ffmpeg crop filter for 9:16 conversion.
 
     Args:
-        crop_mode: 'center' (only mode for v1; future: 'face_track')
+        crop_mode: 'center' (hard crop), 'blur' (preserves full video with blurred background)
         src_w, src_h: Source video dimensions
         target_w, target_h: Output dimensions (default 1080x1920 = 9:16)
 
     Returns:
-        Filter string for -vf
+        Filter string for -filter_complex
     """
-    if crop_mode == "center":
+    if crop_mode == "blur":
+        # Split video into background and foreground.
+        # Background: scale to fill, crop, and heavily blur.
+        # Foreground: scale to fit (letterbox) and overlay on center.
+        return (
+            f"split[bg][fg];"
+            f"[bg]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,crop={target_w}:{target_h},boxblur=40[bg_blurred];"
+            f"[fg]scale={target_w}:{target_h}:force_original_aspect_ratio=decrease[fg_scaled];"
+            f"[bg_blurred][fg_scaled]overlay=(W-w)/2:(H-h)/2"
+        )
+    elif crop_mode == "center":
         # Determine crop to get 9:16 from source
         src_ar = src_w / src_h
         target_ar = target_w / target_h  # 0.5625
@@ -143,7 +153,7 @@ def cut_segment(
     # -ss before -i: fast seek to nearest keyframe before start
     # -ss after -i: accurate seek from keyframe to exact start (re-encodes)
     # -t: duration
-    # -vf: crop/scale to 9:16
+    # -filter_complex: crop/scale/blur to 9:16
     # -c:v libx264 -preset fast -crf 18: re-encode video (High quality)
     # -c:a aac -b:a 128k: re-encode audio
     cmd = [
@@ -152,7 +162,7 @@ def cut_segment(
         "-i", source_path,
         "-ss", "0",  # accurate seek from keyframe (after -i, offset 0 since we already seeked)
         "-t", str(duration),
-        "-vf", crop_filter,
+        "-filter_complex", crop_filter,
         "-c:v", "libx264", "-preset", "fast", "-crf", "18",
         "-r", "30",
         "-c:a", "aac", "-b:a", "128k",
