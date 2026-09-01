@@ -32,7 +32,7 @@ class ClipCaptionResult:
 def build_caption_track_from_whisper(
     transcript: TranscriptResult,
     clip: ClipCandidate,
-    max_chars_per_line: int = 42,
+    max_chars_per_line: int = 20,
     max_lines_per_caption: int = 2,
 ) -> CaptionTrack:
     """Build CaptionTrack from whisper word timestamps, aligned to clip.

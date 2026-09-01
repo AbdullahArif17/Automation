@@ -44,7 +44,7 @@ def estimate_word_duration(words_per_minute: float = 150) -> float:
 def split_into_caption_lines(
     script: str,
     total_duration: float,
-    max_chars_per_line: int = 42,
+    max_chars_per_line: int = 20,
     max_lines_per_caption: int = 2,
     words_per_minute: float = 150,
     word_boundaries: Optional[list[dict]] = None,  # from edge-tts: [{"text": "word", "offset": 100ns, "duration": 100ns}]
@@ -243,8 +243,8 @@ PlayResY: 1920
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Montserrat,90,&H0000FFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,10,0,2,40,40,350,1
-Style: Emphasis,Montserrat,96,&H0000FF00,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,10,0,2,40,40,350,1
+Style: Default,Montserrat,84,&H0000FFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,10,0,2,120,120,350,1
+Style: Emphasis,Montserrat,90,&H0000FF00,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,10,0,2,120,120,350,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
