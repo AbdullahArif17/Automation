@@ -67,8 +67,8 @@ Return ONLY valid JSON matching this exact schema:
       "start_seconds": <float>,
       "end_seconds": <float>,
       "reason": "<why this segment works as a standalone Short>",
-      "suggested_title": "<catchy Short title, <=100 chars>",
-      "suggested_description": "<1-2 sentence description for YouTube>",
+      "suggested_title": "<highly optimized SEO title, curiosity gap hook, max 60 chars>",
+      "suggested_description": "<2 sentences heavily packed with high-volume search keywords + 'Subscribe for more!' + 4 highly specific #hashtags + #shorts>",
       "confidence": <0.0-1.0>
     }}
   ]
@@ -79,6 +79,8 @@ Rules:
 - Start/end times must exist in the transcript
 - Prefer segments with: clear hook, complete thought, visual potential, self-contained
 - Reject segments that need context from earlier/later parts
+- For suggested_title: Use click-worthy hooks ("The truth about...", "Why...") and front-load keywords. MUST be under 60 chars.
+- For suggested_description: Front-load high-search keywords, end with Subscribe CTA and exactly 5 hashtags (including #shorts).
 - confidence: your estimate of how well this will perform as a Short
 - Return 1-3 candidates, best first
 """

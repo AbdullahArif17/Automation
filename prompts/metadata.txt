@@ -1,37 +1,35 @@
-You write YouTube Shorts metadata for an AI/tech explainer channel.
+You write highly optimized, viral YouTube Shorts metadata.
 
 Topic: {topic}
 Script: {script}
 
-Generate competitive, click-worthy metadata that follows YouTube best practices.
+Generate competitive, click-worthy metadata designed specifically for the YouTube Shorts algorithm.
 
 Return ONLY valid JSON:
 {
   "titles": ["title 1", "title 2", "title 3"],
   "description": "1-2 keyword-rich sentences visible before 'show more' + clear CTA + hashtags",
-  "hashtags": ["#shorts", "#ai", "#tech", "#specific_tag1", "#specific_tag2"]
+  "hashtags": ["#shorts", "#specific_tag1", "#specific_tag2"]
 }
 
 Title rules (pick the best 3, max 60 chars each):
-- Include a hook: curiosity gap ("Why..."), concrete outcome ("Cut X by 68%"), or specific number
-- Front-load the most important keyword (AI, ChatGPT, coding, etc.)
-- Avoid generic restatements of the topic — make it a promise of value
-- Match high-performing patterns: "How to X in Y seconds", "X vs Y: Which wins?", "Stop doing X, do Y instead"
+- Make it a hook: curiosity gap ("Why..."), extreme outcome, or specific shocking number.
+- Front-load the most searchable keywords based on the topic.
+- Avoid boring, generic restatements of the topic — make it irresistible.
+- Match highly-searched patterns: "The truth about X", "Why X is secretly Y", "Stop doing X".
 
 Description rules:
-- First 1-2 sentences = hook + keywords (visible before "show more" cutoff at ~100 chars)
-- Include a clear Call-to-Action: "Subscribe for more AI tips" / "Comment your thoughts"
-- End with 5-8 relevant hashtags (broad + niche-specific)
+- Must be extremely SEO-optimized.
+- First 2 sentences = hook + high-volume search keywords (visible before "show more").
+- Include a clear Call-to-Action: "Subscribe for more daily videos!"
+- End with exactly 5 highly-searched hashtags.
 
 Hashtag rules:
-- ALWAYS include #shorts (required for Shorts shelf)
-- Include 1-2 broad tags: #ai #tech #programming #coding
-- Include 2-3 specific tags matching the actual topic (e.g., #chatgpt #llm #vscode #python #automation)
-- NO generic fallback tags if the LLM produces real ones — only use fallback if JSON is missing hashtags entirely
-- All lowercase, no spaces
+- ALWAYS include #shorts (required for Shorts shelf).
+- Include exactly 4 specific, high-volume search tags matching the topic.
+- NO generic fallback tags. All lowercase, no spaces.
 
 Compliance:
-- No keyword stuffing (max 8 hashtags)
-- No deceptive clickbait (title must match content)
-- No misleading claims
-- Titles under 60 characters
+- No keyword stuffing (exactly 5 hashtags total).
+- No deceptive clickbait (title must match the actual content of the script).
+- Titles MUST be under 60 characters so they don't get truncated on mobile.
