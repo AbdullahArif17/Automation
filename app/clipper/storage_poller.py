@@ -497,5 +497,15 @@ def poll_and_clip(
                     logger.info(f"cleaned up source video: {local_path}")
                 except Exception as e:
                     logger.warning(f"failed to clean up source video {local_path}: {e}")
+                
+                # Also clean up the Whisper JSON cache file
+                from app.clipper.transcribe import get_transcript_cache_path
+                try:
+                    cache_path = Path(get_transcript_cache_path(str(local_path), pipeline.settings.whisper_model_size))
+                    if cache_path.exists():
+                        cache_path.unlink()
+                        logger.info(f"cleaned up transcript cache: {cache_path}")
+                except Exception as e:
+                    logger.warning(f"failed to clean up transcript cache: {e}")
 
     return results
