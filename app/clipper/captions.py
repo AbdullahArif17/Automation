@@ -124,9 +124,20 @@ def build_caption_track_from_whisper(
             emphasis=emphasis,
         ))
 
-    # Ensure last caption ends at clip duration
+    # Ensure last caption ends before CTA
     if caption_lines:
-        caption_lines[-1].end = round(clip_duration, 2)
+        caption_lines[-1].end = min(round(clip_duration, 2), round(clip_duration - 2.0, 2))
+
+    # Append CTA in the last 2 seconds
+    cta_start = max(0.0, round(clip_duration - 2.0, 2))
+    cta_end = round(clip_duration, 2)
+    caption_lines.append(CaptionLine(
+        index=len(caption_lines) + 1,
+        start=cta_start,
+        end=cta_end,
+        text="SUBSCRIBE FOR MORE!",
+        emphasis=True,
+    ))
 
     logger.info(f"built {len(caption_lines)} caption lines from whisper timestamps for clip [{clip_start:.1f}-{clip_end:.1f}]",
                 extra={"stage": "captions", "status": "built", "word_count": len(clip_words)})

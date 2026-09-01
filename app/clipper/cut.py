@@ -134,7 +134,7 @@ def cut_segment(
 
     # Build filter chain
     crop_filter = build_crop_filter(crop_mode, src_w, src_h, target_w, target_h)
-    
+
     if ass_path:
         safe_ass = str(Path(ass_path).absolute()).replace("\\", "/").replace(":", "\\:")
         crop_filter += f",subtitles='{safe_ass}'"

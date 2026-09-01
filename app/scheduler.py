@@ -68,18 +68,29 @@ class DailyRunner:
         return self._topics_today() < self.max_generations
 
     def _pick_topic(self) -> Optional[str]:
-        """Select next topic: prefer high-score from analytics, else discover new."""
-        from app.content.topic_selector import TopicSelector
-        from app.research.sources import discover_candidates, TopicCandidate
+        """Select next topic: prefer user niche, else analytics, else discover new."""
+        import os
+        import random
+        from app.utils.logging import get_logger
+        logger = get_logger(__name__)
+
+        niche = os.getenv("TOPIC_NICHE")
+        if niche:
+            # If the user specified a custom niche, brainstorm a random unique topic idea
+            prompt = f"Brainstorm a highly specific, viral YouTube Short video title about: {niche}. Make it extremely unique and different from obvious topics. Just return the title string, nothing else. Example: 'The weirdest football match ever played in space'."
+            topic = self.pipeline.provider.generate(prompt).strip(' "\'')
+            logger.info(f"scheduler: generated niche topic '{topic}' from '{niche}'",
+                        extra={"stage": "scheduler", "status": "topic_from_niche"})
+            return topic
 
         db = self.pipeline.db
-        # 1. Try topic optimization from analytics
+        # 1. Try topic optimization from analytics (pick randomly among top to avoid repeating)
         try:
             from app.youtube.analytics import TopicOptimizer
             opt = TopicOptimizer(db)
-            best = opt.get_best_topics(limit=3)
+            best = opt.get_best_topics(limit=5)
             if best:
-                topic = best[0][0]
+                topic = random.choice(best)[0]
                 logger.info(f"scheduler: using top-performing topic '{topic}'",
                             extra={"stage": "scheduler", "status": "topic_from_analytics"})
                 return topic
@@ -87,11 +98,13 @@ class DailyRunner:
             pass
 
         # 2. Discover fresh candidates via RSS
+        from app.research.sources import discover_candidates, TopicCandidate
         candidates = discover_candidates(max_per_source=3)
         if not candidates:
             return None
 
         # 3. Score and pick best
+        from app.content.topic_selector import TopicSelector
         selector = TopicSelector(self.pipeline.provider, db)
         scored = selector.select_best(candidates[:10], job_id="scheduler")
         if scored and scored.final >= 0.5:
