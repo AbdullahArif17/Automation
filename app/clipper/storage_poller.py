@@ -355,6 +355,7 @@ def download_video_youtube(source: SourceVideo, dest_dir: Path) -> Path:
 
     video_url = f"https://www.youtube.com/watch?v={source.yt_video_id}"
 
+    auth_ok = False
     if has_cookies:
         cookies_path = Path(cookies_path_str)
         try:
@@ -379,12 +380,11 @@ def download_video_youtube(source: SourceVideo, dest_dir: Path) -> Path:
         video_url,
     ]
 
-    # Use OAuth2 (TV Login) instead of fragile cookies
-    insert_idx = 1 + len(YT_DLP_COMMON_ARGS)
-    cmd.insert(insert_idx, "--username")
-    cmd.insert(insert_idx + 1, "oauth2")
-    cmd.insert(insert_idx + 2, "--password")
-    cmd.insert(insert_idx + 3, "")
+    if has_cookies and auth_ok:
+        # Insert cookies args right after YT_DLP_COMMON_ARGS
+        insert_idx = 1 + len(YT_DLP_COMMON_ARGS)
+        cmd.insert(insert_idx, "--cookies")
+        cmd.insert(insert_idx + 1, cookies_path_str)
 
     # Retry on bot-detection (transient), capped at 2 attempts
     last_err = ""
