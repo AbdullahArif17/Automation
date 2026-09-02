@@ -303,12 +303,22 @@ class ClipperPipeline:
 
         privacy = "public" if self.settings.auto_publish else "private"
 
+        # Generate rich SEO tags: base shorts tags + extracted hashtags + significant keywords
+        import re
+        base_tags = ["shorts", "youtubeshorts", "viral", "trending"]
+        desc_tags = [w.strip("#").lower() for w in re.findall(r"#\w+", candidate.suggested_description)]
+        title_words = [
+            w.lower() for w in re.findall(r"\b[A-Za-z]{3,}\b", candidate.suggested_title)
+            if w.lower() not in {"the", "and", "for", "with", "this", "that", "why", "how", "what"}
+        ]
+        tags = list(dict.fromkeys(base_tags + desc_tags + title_words))[:30]
+
         uploader = YouTubeUploader(self.auth)
         result = uploader.upload(
             video_path,
             candidate.suggested_title,
             candidate.suggested_description,
-            candidate.suggested_title.split(),
+            tags,
             privacy_status=privacy,
             job_id=str(job_db_id),
         )

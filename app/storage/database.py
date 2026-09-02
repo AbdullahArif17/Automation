@@ -165,6 +165,12 @@ CREATE TABLE IF NOT EXISTS errors (
     error TEXT,
     created_at TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_videos_source_etag ON videos(source_etag);
+CREATE INDEX IF NOT EXISTS idx_videos_topic ON videos(topic);
+CREATE INDEX IF NOT EXISTS idx_videos_youtube_id ON videos(youtube_video_id);
+CREATE INDEX IF NOT EXISTS idx_publishing_jobs_state ON publishing_jobs(state);
+CREATE INDEX IF NOT EXISTS idx_publishing_jobs_video_id ON publishing_jobs(video_id);
 """
 
 

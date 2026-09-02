@@ -133,11 +133,17 @@ def parse_highlight_response(response: str, min_dur: float, max_dur: float, vide
         if c_mode not in ("center", "blur"):
             c_mode = "center"
 
+        title = c["suggested_title"].strip()
+        if "#shorts" not in title.lower():
+            if len(title) <= 92:
+                title = f"{title} #shorts"
+        title = title[:100]
+
         candidates.append(ClipCandidate(
             start_seconds=start,
             end_seconds=end,
             reason=c["reason"],
-            suggested_title=c["suggested_title"][:100],
+            suggested_title=title,
             suggested_description=c["suggested_description"][:5000],
             confidence=float(c["confidence"]),
             crop_mode=c_mode,

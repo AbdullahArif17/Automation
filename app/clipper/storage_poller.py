@@ -323,10 +323,13 @@ def list_new_videos_youtube(
         seconds = int(dur_match.group(3) or 0)
         duration_secs = hours * 3600 + minutes * 60 + seconds
 
-        if duration_secs < 60:  # Skip Shorts (< 60s)
-            continue
-
         title = v["snippet"].get("title", "Untitled")
+        title_lower = title.lower()
+
+        # Skip pre-existing Shorts / clips: must be at least 120s long and not tagged as a Short
+        if duration_secs < 120 or "#shorts" in title_lower or "#short" in title_lower or "#tiktok" in title_lower:
+            logger.info(f"Skipping pre-existing Short/clip ({duration_secs}s): {title}")
+            continue
         new_videos.append(SourceVideo(
             source_type="youtube",
             video_id=yt_video_id,
@@ -471,12 +474,16 @@ def poll_and_clip(
         playlist_id = os.getenv("CLIP_SOURCE_YT_PLAYLIST_ID")
         search_query = os.getenv("CLIP_SOURCE_YT_SEARCH_QUERY")
 
-        if search_query and "|" in search_query:
-            import random
-            queries = [q.strip() for q in search_query.split("|") if q.strip()]
-            if queries:
-                search_query = random.choice(queries)
-                logger.info(f"Multiple topics found in env. Randomly selected query: '{search_query}'")
+        if search_query:
+            clean_sq = search_query.strip(' "\'')
+            if "|" in clean_sq:
+                import random
+                queries = [q.strip(' "\'') for q in clean_sq.split("|") if q.strip(' "\'')]
+                if queries:
+                    search_query = random.choice(queries)
+                    logger.info(f"Multiple topics found in env. Randomly selected query: '{search_query}'")
+            else:
+                search_query = clean_sq
 
         new_videos = list_new_videos_youtube(db, channel_input=channel_id, playlist_id=playlist_id, search_query=search_query, max_videos=max_videos_per_run)
         download_fn = download_video_youtube
@@ -521,5 +528,16 @@ def poll_and_clip(
                         logger.info(f"cleaned up transcript cache: {cache_path}")
                 except Exception as e:
                     logger.warning(f"failed to clean up transcript cache: {e}")
+
+            # If upload was enabled, clean up the rendered clips & subtitles in output/ to avoid disk leaks
+            if upload:
+                try:
+                    stem = local_path.stem if local_path else (src.yt_video_id or src.video_id)
+                    output_dir = Path(pipeline.settings.clip_output_dir)
+                    for clip_file in output_dir.glob(f"{stem}_clip_*"):
+                        clip_file.unlink(missing_ok=True)
+                        logger.info(f"cleaned up published clip file: {clip_file.name}")
+                except Exception as e:
+                    logger.warning(f"failed to clean up output clips for {src.video_id}: {e}")
 
     return results

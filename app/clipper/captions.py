@@ -5,6 +5,7 @@ CaptionTrack from actual word-level timestamps aligned to the clip segment.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -113,7 +114,6 @@ def build_caption_track_from_whisper(
         end_time = block_words[-1][2]
 
         # Detect emphasis (ALL CAPS or *wrapped*)
-        import re
         emphasis = bool(re.search(r'\*[^*]+\*|\b[A-Z]{3,}\b', block_text))
 
         caption_lines.append(CaptionLine(
