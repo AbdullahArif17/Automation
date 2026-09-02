@@ -157,8 +157,11 @@ class ClipperPipeline:
                     clip_filename = f"{source.stem}_clip_{idx+1}.mp4"
                     clip_path = str(self.output_dir / clip_filename)
 
-                    # Decide crop mode: if settings say 'auto', use LLM's choice, else force settings
-                    chosen_crop_mode = candidate.crop_mode if self.settings.clip_crop_mode == "auto" else self.settings.clip_crop_mode
+                    # Decide crop mode: if settings say 'auto', use 'blur' if candidate requested blur, else 'auto' (smart face tracking)
+                    if self.settings.clip_crop_mode == "auto":
+                        chosen_crop_mode = "blur" if candidate.crop_mode == "blur" else "auto"
+                    else:
+                        chosen_crop_mode = self.settings.clip_crop_mode
                     
                     cut_result = cut_segment(source_path, candidate, clip_path, crop_mode=chosen_crop_mode, job_id=jid, ass_path=caption_result.ass_path)
                     clip_outcome.cut_result = cut_result

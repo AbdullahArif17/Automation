@@ -10,7 +10,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 from app.clipper.highlight import ClipCandidate
 from app.config.settings import get_settings
@@ -35,13 +35,13 @@ def check_ffmpeg() -> bool:
     return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 
 
-def get_video_info(path: str) -> tuple[int, int, float]:
-    """Get video width, height, duration via ffprobe."""
+def get_video_info(path: str) -> tuple[int, int, float, float]:
+    """Get video width, height, duration, and fps via ffprobe."""
     import json
     cmd = [
         "ffprobe", "-v", "error",
         "-select_streams", "v:0",
-        "-show_entries", "stream=width,height",
+        "-show_entries", "stream=width,height,r_frame_rate",
         "-show_entries", "format=duration",
         "-of", "json", path
     ]
@@ -52,31 +52,64 @@ def get_video_info(path: str) -> tuple[int, int, float]:
     w = data["streams"][0]["width"]
     h = data["streams"][0]["height"]
     dur = float(data["format"]["duration"])
-    return w, h, dur
+    fps = 30.0
+    fps_str = data["streams"][0].get("r_frame_rate", "30/1")
+    if "/" in fps_str:
+        num, den = fps_str.split("/", 1)
+        try:
+            fps = float(num) / float(den)
+        except (ValueError, ZeroDivisionError):
+            fps = 30.0
+    return w, h, dur, fps
 
 
-def build_crop_filter(crop_mode: str, src_w: int, src_h: int, target_w: int = 1080, target_h: int = 1920) -> str:
-    """Build ffmpeg crop filter for 9:16 conversion.
+def build_crop_filter(
+    crop_mode: str,
+    src_w: int,
+    src_h: int,
+    target_w: int = 1080,
+    target_h: int = 1920,
+    framing_plan: Optional[Any] = None,
+) -> str:
+    """Build ffmpeg crop filter for 9:16 conversion with high-fidelity Lanczos scaling.
 
     Args:
-        crop_mode: 'center' (hard crop), 'blur' (preserves full video with blurred background)
+        crop_mode: 'auto'/'smart' (face tracking), 'center' (hard crop), 'blur' (blurred background)
         src_w, src_h: Source video dimensions
         target_w, target_h: Output dimensions (default 1080x1920 = 9:16)
+        framing_plan: Optional FramingPlan from face detection analysis
 
     Returns:
         Filter string for -filter_complex
     """
+    if framing_plan is not None:
+        if framing_plan.mode == "split":
+            top_h = target_h // 2
+            return (
+                f"split[vtop_in][vbot_in];"
+                f"[vtop_in]crop={framing_plan.top_w}:{framing_plan.top_h}:{framing_plan.top_x}:{framing_plan.top_y},"
+                f"scale={target_w}:{top_h}:flags=lanczos[top_panel];"
+                f"[vbot_in]crop={framing_plan.bottom_w}:{framing_plan.bottom_h}:{framing_plan.bottom_x}:{framing_plan.bottom_y},"
+                f"scale={target_w}:{top_h}:flags=lanczos[bottom_panel];"
+                f"[top_panel][bottom_panel]vstack=inputs=2"
+            )
+        elif framing_plan.mode == "single":
+            return (
+                f"crop={framing_plan.crop_w}:{framing_plan.crop_h}:{framing_plan.crop_x}:{framing_plan.crop_y},"
+                f"scale={target_w}:{target_h}:flags=lanczos:force_original_aspect_ratio=increase,crop={target_w}:{target_h}"
+            )
+
     if crop_mode == "blur":
         # Split video into background and foreground.
         # Background: scale to fill, crop, and heavily blur.
-        # Foreground: scale to fit (letterbox) and overlay on center.
+        # Foreground: scale to fit (letterbox) and overlay on center with lanczos sharpness.
         return (
             f"split[bg][fg];"
-            f"[bg]scale={target_w}:{target_h}:force_original_aspect_ratio=increase,crop={target_w}:{target_h},boxblur=40[bg_blurred];"
-            f"[fg]scale={target_w}:{target_h}:force_original_aspect_ratio=decrease[fg_scaled];"
+            f"[bg]scale={target_w}:{target_h}:flags=lanczos:force_original_aspect_ratio=increase,crop={target_w}:{target_h},boxblur=40[bg_blurred];"
+            f"[fg]scale={target_w}:{target_h}:flags=lanczos:force_original_aspect_ratio=decrease[fg_scaled];"
             f"[bg_blurred][fg_scaled]overlay=(W-w)/2:(H-h)/2"
         )
-    elif crop_mode == "center":
+    elif crop_mode in ("center", "auto", "smart", "face"):
         # Determine crop to get 9:16 from source
         src_ar = src_w / src_h
         target_ar = target_w / target_h  # 0.5625
@@ -94,10 +127,10 @@ def build_crop_filter(crop_mode: str, src_w: int, src_h: int, target_w: int = 10
             x_offset = 0
             y_offset = (src_h - crop_h) // 2
 
-        return f"crop={crop_w}:{crop_h}:{x_offset}:{y_offset},scale={target_w}:{target_h}:force_original_aspect_ratio=increase,crop={target_w}:{target_h}"
+        return f"crop={crop_w}:{crop_h}:{x_offset}:{y_offset},scale={target_w}:{target_h}:flags=lanczos:force_original_aspect_ratio=increase,crop={target_w}:{target_h}"
     else:
-        # Default: just scale to fit (letterbox)
-        return f"scale={target_w}:{target_h}:force_original_aspect_ratio=increase,crop={target_w}:{target_h}"
+        # Default: scale with lanczos
+        return f"scale={target_w}:{target_h}:flags=lanczos:force_original_aspect_ratio=increase,crop={target_w}:{target_h}"
 
 
 def cut_segment(
@@ -117,7 +150,7 @@ def cut_segment(
         source_path: Path to source video.
         candidate: ClipCandidate with start/end timestamps.
         output_path: Where to write the clipped video.
-        crop_mode: 'center' (default from settings) or other future modes.
+        crop_mode: 'auto' (default: smart AI face tracking), 'center', 'blur'.
         job_id: Job ID for logging.
         ass_path: Optional path to .ass subtitle file to burn into video.
 
@@ -132,7 +165,8 @@ def cut_segment(
     target_w = settings.video_width
     target_h = settings.video_height
 
-    src_w, src_h, src_dur = get_video_info(source_path)
+    src_w, src_h, src_dur, src_fps = get_video_info(source_path)
+    target_fps = 60 if src_fps >= 55.0 else 30
 
     # Validate timestamps
     if candidate.start_seconds < 0 or candidate.end_seconds > src_dur:
@@ -142,20 +176,41 @@ def cut_segment(
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
+    # Perform smart AI face tracking if mode is auto/smart/face
+    framing_plan = None
+    if crop_mode in ("auto", "smart", "face"):
+        try:
+            from app.clipper.face_tracker import analyze_clip_framing
+            framing_plan = analyze_clip_framing(
+                video_path=source_path,
+                start_seconds=candidate.start_seconds,
+                duration=duration,
+                src_w=src_w,
+                src_h=src_h,
+                target_w=target_w,
+                target_h=target_h,
+            )
+            logger.info(f"AI framing plan determined for job {job_id}: mode={framing_plan.mode}")
+        except Exception as exc:
+            logger.warning(f"Face tracking analysis failed, falling back to standard crop: {exc}")
+            framing_plan = None
+
     # Build filter chain
-    crop_filter = build_crop_filter(crop_mode, src_w, src_h, target_w, target_h)
+    crop_filter = build_crop_filter(crop_mode, src_w, src_h, target_w, target_h, framing_plan=framing_plan)
 
     if ass_path:
         safe_ass = str(Path(ass_path).absolute()).replace("\\", "/").replace(":", "\\:")
         crop_filter += f",subtitles='{safe_ass}'"
 
-    # ffmpeg command:
+    # ffmpeg command with studio-grade settings:
     # -ss before -i: fast seek to nearest keyframe before start
     # -ss after -i: accurate seek from keyframe to exact start (re-encodes)
     # -t: duration
-    # -filter_complex: crop/scale/blur to 9:16
-    # -c:v libx264 -preset fast -crf 18: re-encode video (High quality)
-    # -c:a aac -b:a 128k: re-encode audio
+    # -filter_complex: crop/scale/blur with Lanczos interpolation
+    # -c:v libx264 -preset medium -crf 17: visually lossless broadcast quality
+    # -pix_fmt yuv420p: universal mobile player compatibility
+    # -r target_fps: preserves up to 60fps for silky smooth motion
+    # -c:a aac -b:a 192k -ar 48000: pristine 48kHz stereo audio
     cmd = [
         "ffmpeg", "-y",
         "-ss", str(candidate.start_seconds),  # fast seek (before -i)
@@ -163,19 +218,24 @@ def cut_segment(
         "-ss", "0",  # accurate seek from keyframe (after -i, offset 0 since we already seeked)
         "-t", str(duration),
         "-filter_complex", crop_filter,
-        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-        "-r", "30",
-        "-c:a", "aac", "-b:a", "128k",
+        "-c:v", "libx264",
+        "-preset", "medium",
+        "-crf", "17",
+        "-pix_fmt", "yuv420p",
+        "-r", str(target_fps),
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-ar", "48000",
         "-avoid_negative_ts", "make_zero",
         "-fflags", "+genpts",
         output_path,
     ]
 
-    logger.info(f"cutting segment [{candidate.start_seconds:.1f}-{candidate.end_seconds:.1f}] -> {output_path}",
+    logger.info(f"cutting segment [{candidate.start_seconds:.1f}-{candidate.end_seconds:.1f}] -> {output_path} (quality: crf=17, fps={target_fps})",
                 extra={"job_id": job_id, "stage": "cut", "status": "start"})
 
     def _run():
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
         if result.returncode != 0:
             raise RuntimeError(f"ffmpeg cut failed: {result.stderr[-2000:]}")
         return result
@@ -183,7 +243,7 @@ def cut_segment(
     retry(_run, max_attempts=2, retry_on=(subprocess.TimeoutExpired,))
 
     # Verify output
-    out_w, out_h, out_dur = get_video_info(output_path)
+    out_w, out_h, out_dur, _ = get_video_info(output_path)
 
     logger.info(f"cut complete: {out_dur:.1f}s {out_w}x{out_h} -> {output_path}",
                 extra={"job_id": job_id, "stage": "cut", "status": "done"})

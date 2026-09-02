@@ -38,8 +38,18 @@ logger = get_logger(__name__)
 YT_DLP_COMMON_ARGS = [
     "--js-runtimes", "deno",
     "--remote-components", "ejs:github",
-    "--extractor-args", "youtube:player_client=ios",
+    "--force-ipv6",
 ]
+
+
+def _subprocess_env() -> dict[str, str]:
+    """Return env dict with ~/.deno/bin injected into PATH so yt-dlp can find Deno."""
+    env = os.environ.copy()
+    deno_bin = os.path.join(os.path.expanduser("~"), ".deno", "bin")
+    current_path = env.get("PATH", "")
+    if deno_bin not in current_path:
+        env["PATH"] = f"{deno_bin}:{current_path}"
+    return env
 
 
 def validate_cookies_file(cookies_path: Path, test_url: str = "https://www.youtube.com/feed/subscriptions") -> tuple[int, bool]:
@@ -99,7 +109,8 @@ def validate_cookies_file(cookies_path: Path, test_url: str = "https://www.youtu
             ["yt-dlp", *YT_DLP_COMMON_ARGS, "--cookies", str(cookies_path), "--skip-download",
              "--playlist-items", "1",
              "--print", "id", test_url],
-            capture_output=True, text=True, timeout=60
+            capture_output=True, text=True, timeout=60,
+            env=_subprocess_env()
         )
         if result.returncode == 0 and result.stdout.strip():
             auth_ok = True
@@ -375,12 +386,13 @@ def download_video_youtube(source: SourceVideo, dest_dir: Path) -> Path:
     cmd = [
         "yt-dlp",
         *YT_DLP_COMMON_ARGS,
-        "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "-f", "bestvideo+bestaudio/best",
+        "--merge-output-format", "mp4",
         "-o", str(local_path),
         video_url,
     ]
 
-    if has_cookies and auth_ok:
+    if has_cookies:
         # Insert cookies args right after YT_DLP_COMMON_ARGS
         insert_idx = 1 + len(YT_DLP_COMMON_ARGS)
         cmd.insert(insert_idx, "--cookies")
@@ -390,10 +402,11 @@ def download_video_youtube(source: SourceVideo, dest_dir: Path) -> Path:
     last_err = ""
     for attempt in range(2):
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=_subprocess_env())
             if result.returncode == 0:
                 break
-            last_err = result.stderr[-1000:]
+            last_err = result.stderr[-2000:]
+            logger.debug(f"yt-dlp stderr for {source.yt_video_id}: {last_err}")
             # Bot-detection is often transient; retry once
             if "confirm you're not a bot" in last_err.lower() and attempt == 0:
                 logger.warning(f"yt-dlp bot-detection hit for {source.yt_video_id}, retrying")

@@ -52,3 +52,6 @@ cookies.txt*
 cookies_b64.txt
 miniconda.sh
 ssh-key-2026-09-01 (1).key
+venv/
+run_wsl.txt
+ssh-key-2026-09-02.key
