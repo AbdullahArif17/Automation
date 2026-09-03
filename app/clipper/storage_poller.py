@@ -471,6 +471,15 @@ def download_video_youtube(source: SourceVideo, dest_dir: Path) -> Path:
                 raise RuntimeError(f"yt-dlp timed out downloading {source.yt_video_id}")
         else:
             raise RuntimeError(f"yt-dlp failed after retry: {last_err}")
+    except Exception:
+        # Clean up any partial or temp files left behind by yt-dlp on failure
+        for leftover in dest_dir.glob(f"{source.yt_video_id}*"):
+            try:
+                leftover.unlink()
+                logger.info(f"cleaned up partial download: {leftover.name}")
+            except Exception:
+                pass
+        raise
     finally:
         if working_cookies and working_cookies.exists():
             try:
@@ -478,6 +487,8 @@ def download_video_youtube(source: SourceVideo, dest_dir: Path) -> Path:
             except Exception:
                 pass
 
+    if not local_path.exists():
+        raise RuntimeError(f"yt-dlp completed but output file {local_path} was not created")
     size = local_path.stat().st_size
     logger.info(f"downloaded youtube:{source.yt_video_id} -> {local_path} ({size} bytes)")
     return local_path
@@ -548,6 +559,17 @@ def poll_and_clip(
     else:
         raise RuntimeError(f"Unknown CLIP_SOURCE_MODE: {source_mode} (must be 's3' or 'youtube')")
 
+    # Clean up any stale partial files from previous crashed runs in input/
+    input_dir = Path(pipeline.settings.clip_input_dir)
+    if input_dir.exists():
+        for leftover in input_dir.glob("*"):
+            if leftover.is_file() and (leftover.suffix in (".webm", ".part") or ".temp." in leftover.name or ".f" in leftover.name):
+                try:
+                    leftover.unlink()
+                    logger.info(f"startup sweep cleaned stale file: {leftover.name}")
+                except Exception:
+                    pass
+
     results = []
     for src in new_videos:
         local_path = None
@@ -576,32 +598,26 @@ def poll_and_clip(
             logger.error(f"clipper failed for {src.video_id}: {exc}")
             results.append((src, False, str(exc)))
         finally:
-            if local_path and local_path.exists():
-                try:
-                    local_path.unlink()
-                    logger.info(f"cleaned up source video: {local_path}")
-                except Exception as e:
-                    logger.warning(f"failed to clean up source video {local_path}: {e}")
-                
-                # Also clean up the Whisper JSON cache file
-                from app.clipper.transcribe import get_transcript_cache_path
-                try:
-                    cache_path = Path(get_transcript_cache_path(str(local_path), pipeline.settings.whisper_model_size))
-                    if cache_path.exists():
-                        cache_path.unlink()
-                        logger.info(f"cleaned up transcript cache: {cache_path}")
-                except Exception as e:
-                    logger.warning(f"failed to clean up transcript cache: {e}")
+            video_stem = getattr(src, "yt_video_id", None) or getattr(src, "video_id", None) or (local_path.stem if local_path else None)
+            input_dir = Path(pipeline.settings.clip_input_dir)
+            output_dir = Path(pipeline.settings.clip_output_dir)
 
-            # If upload was enabled, clean up the rendered clips & subtitles in output/ to avoid disk leaks
-            if upload:
-                try:
-                    stem = local_path.stem if local_path else (src.yt_video_id or src.video_id)
-                    output_dir = Path(pipeline.settings.clip_output_dir)
-                    for clip_file in output_dir.glob(f"{stem}_clip_*"):
-                        clip_file.unlink(missing_ok=True)
-                        logger.info(f"cleaned up published clip file: {clip_file.name}")
-                except Exception as e:
-                    logger.warning(f"failed to clean up output clips for {src.video_id}: {e}")
+            if video_stem:
+                # 1. Clean up ALL source, partial, and cache files matching video_stem in input/
+                for f in input_dir.glob(f"{video_stem}*"):
+                    try:
+                        f.unlink()
+                        logger.info(f"cleaned up input file: {f.name}")
+                    except Exception as e:
+                        logger.warning(f"failed to clean up input file {f}: {e}")
+
+                # 2. Clean up any rendered clips & subtitles in output/
+                if upload:
+                    for clip_file in output_dir.glob(f"{video_stem}*"):
+                        try:
+                            clip_file.unlink()
+                            logger.info(f"cleaned up output clip file: {clip_file.name}")
+                        except Exception as e:
+                            logger.warning(f"failed to clean up output clip {clip_file}: {e}")
 
     return results
