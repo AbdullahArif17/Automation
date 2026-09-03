@@ -402,5 +402,53 @@ def test_validate_cookies_file_empty_raises():
             validate_cookies_file(cookies_path)
 
 
+def test_build_dynamic_crop_expr():
+    from app.clipper.cut import _build_dynamic_crop_expr
+    from app.clipper.face_tracker import ShotPlan
+
+    # 1. Empty shots
+    assert _build_dynamic_crop_expr([]) == "0"
+
+    # 2. Single shot
+    single = [ShotPlan(0.0, 10.0, 200, 0, 405, 720)]
+    assert _build_dynamic_crop_expr(single) == "200"
+
+    # 3. 2 shots
+    shots2 = [
+        ShotPlan(0.0, 15.0, 180, 0, 405, 720),
+        ShotPlan(15.0, 30.0, 720, 0, 405, 720),
+    ]
+    assert _build_dynamic_crop_expr(shots2) == "if(lt(t,15.00),180,720)"
+
+    # 4. 3 shots
+    shots3 = [
+        ShotPlan(0.0, 10.0, 100, 0, 405, 720),
+        ShotPlan(10.0, 25.0, 500, 0, 405, 720),
+        ShotPlan(25.0, 40.0, 800, 0, 405, 720),
+    ]
+    assert _build_dynamic_crop_expr(shots3) == "if(lt(t,10.00),100,if(lt(t,25.00),500,800))"
+
+
+def test_build_crop_filter_dynamic_mode():
+    from app.clipper.cut import build_crop_filter
+    from app.clipper.face_tracker import FramingPlan, ShotPlan
+
+    shots = [
+        ShotPlan(0.0, 12.0, 150, 0, 405, 720),
+        ShotPlan(12.0, 30.0, 650, 0, 405, 720),
+    ]
+    plan = FramingPlan(
+        mode="dynamic",
+        crop_x=150,
+        crop_y=0,
+        crop_w=405,
+        crop_h=720,
+        shots=shots,
+    )
+    filter_str = build_crop_filter("auto", 1280, 720, 1080, 1920, framing_plan=plan)
+    assert "if(lt(t,12.00),150,650)" in filter_str
+    assert "scale=1080:1920" in filter_str
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

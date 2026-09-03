@@ -63,6 +63,23 @@ def get_video_info(path: str) -> tuple[int, int, float, float]:
     return w, h, dur, fps
 
 
+def _build_dynamic_crop_expr(shots: list[Any]) -> str:
+    """Build a nested FFmpeg time expression for dynamic multi-shot crop X coordinate.
+
+    Example: 3 shots ending at t=12.5s (x=180), t=28.0s (x=720), and t=45.0s (x=240):
+    Returns: 'if(lt(t,12.50),180,if(lt(t,28.00),720,240))'
+    """
+    if not shots:
+        return "0"
+    if len(shots) == 1:
+        return str(shots[0].crop_x)
+
+    expr = str(shots[-1].crop_x)
+    for shot in reversed(shots[:-1]):
+        expr = f"if(lt(t,{shot.end_time:.2f}),{shot.crop_x},{expr})"
+    return expr
+
+
 def build_crop_filter(
     crop_mode: str,
     src_w: int,
@@ -92,6 +109,12 @@ def build_crop_filter(
                 f"[vbot_in]crop={framing_plan.bottom_w}:{framing_plan.bottom_h}:{framing_plan.bottom_x}:{framing_plan.bottom_y},"
                 f"scale={target_w}:{top_h}:flags=lanczos[bottom_panel];"
                 f"[top_panel][bottom_panel]vstack=inputs=2"
+            )
+        elif framing_plan.mode == "dynamic" and getattr(framing_plan, "shots", None):
+            x_expr = _build_dynamic_crop_expr(framing_plan.shots)
+            return (
+                f"crop={framing_plan.crop_w}:{framing_plan.crop_h}:'{x_expr}':{framing_plan.crop_y},"
+                f"scale={target_w}:{target_h}:flags=lanczos:force_original_aspect_ratio=increase,crop={target_w}:{target_h}"
             )
         elif framing_plan.mode == "single":
             return (

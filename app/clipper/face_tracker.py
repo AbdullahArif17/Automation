@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -32,10 +32,10 @@ MODEL_PATH = MODEL_CACHE_DIR / "face_detection_yunet_2023mar.onnx"
 
 
 def _ensure_yunet_model() -> Optional[str]:
-    """Download YuNet ONNX model (~336KB) if not already present."""
+    """Download YuNet ONNX model to local cache if not present."""
+    if MODEL_PATH.exists():
+        return str(MODEL_PATH)
     try:
-        if MODEL_PATH.exists() and MODEL_PATH.stat().st_size > 100_000:
-            return str(MODEL_PATH)
         MODEL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         logger.info(f"Downloading YuNet face detection model to {MODEL_PATH}...")
         urllib.request.urlretrieve(YUNET_MODEL_URL, str(MODEL_PATH))
@@ -63,14 +63,26 @@ class FaceBox:
 
 
 @dataclass
+class ShotPlan:
+    """Represents framing for a discrete camera shot / scene within the clip."""
+    start_time: float  # relative to clip start (seconds)
+    end_time: float    # relative to clip start (seconds)
+    crop_x: int
+    crop_y: int
+    crop_w: int
+    crop_h: int
+
+
+@dataclass
 class FramingPlan:
-    mode: str  # "single", "split", or "center"
+    mode: str  # "single", "dynamic", "split", or "center"
     has_subtitles: bool = False  # True if source video already has hardcoded subtitles
-    # For single mode:
+    # For single / dynamic mode:
     crop_x: int = 0
     crop_y: int = 0
     crop_w: int = 0
     crop_h: int = 0
+    shots: list[ShotPlan] = field(default_factory=list)
     # For split mode (top & bottom crops):
     top_x: int = 0
     top_y: int = 0
@@ -193,7 +205,14 @@ def analyze_clip_framing(
     target_h: int = 1920,
     sample_interval: float = 0.5,
 ) -> FramingPlan:
-    """Analyze video frames across the clip segment to determine optimal 9:16 framing."""
+    """Analyze video frames across the clip segment to determine optimal 9:16 framing.
+
+    Supports:
+    1. Dynamic Multi-Shot AI Editing: cuts/pans between speakers on camera angle changes.
+    2. Side-by-Side Split Screen: stacks 2 distinct speakers (top & bottom) for wide podcast frames.
+    3. Single Speaker Tracking: centers on primary speaker.
+    4. Center Crop Fallback: for non-face / B-roll footage.
+    """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         logger.warning(f"Could not open {video_path} for face analysis, using center crop")
@@ -202,7 +221,17 @@ def analyze_clip_framing(
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     detector = FaceDetector()
 
-    all_face_centers: list[list[int]] = []  # per-frame list of X centers
+    @dataclass
+    class _FrameSample:
+        time: float
+        faces: list[int]
+        thumb: np.ndarray
+
+    samples: list[_FrameSample] = []
+    cut_timestamps: list[float] = [start_seconds]
+    prev_thumb: Optional[np.ndarray] = None
+    last_cut = start_seconds
+
     total_sampled = 0
     subtitle_hits = 0
     current_time = start_seconds
@@ -240,13 +269,24 @@ def analyze_clip_framing(
         detected = detector.detect(small_frame)
         frame_centers = []
         for face in detected:
-            # Scale back to original coordinates
             orig_cx = int(face.center_x / scale)
             frame_centers.append(orig_cx)
 
-        if frame_centers:
-            all_face_centers.append(sorted(frame_centers))
+        # Scene change / camera cut detection:
+        # Downscale grayscale to (160, 90) for fast difference check
+        gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
+        thumb = cv2.resize(gray, (160, 90))
 
+        if prev_thumb is not None:
+            diff = float(np.mean(cv2.absdiff(thumb, prev_thumb)))
+            # A camera switch between different angles/people yields diff > 28
+            # Minimum shot length = 1.5s to prevent jitter on quick movement
+            if diff > 28.0 and (current_time - last_cut) >= 1.5:
+                cut_timestamps.append(current_time)
+                last_cut = current_time
+
+        prev_thumb = thumb
+        samples.append(_FrameSample(time=current_time, faces=sorted(frame_centers), thumb=thumb))
         current_time += sample_interval
 
     cap.release()
@@ -255,32 +295,87 @@ def analyze_clip_framing(
     if has_existing_subs:
         logger.info(f"Pre-existing hardcoded subtitles detected in source ({subtitle_hits}/{total_sampled} frames)")
 
+    all_face_centers = [s.faces for s in samples if s.faces]
     if not all_face_centers:
         logger.info("No faces detected in clip; falling back to center crop")
         plan = _make_center_plan(src_w, src_h, target_w, target_h)
         plan.has_subtitles = has_existing_subs
         return plan
 
-    # Check for consistent 2-person podcast format:
-    # If in >= 40% of sampled frames we see 2 distinct faces separated by at least 25% of screen width
+    # 1. Check for consistent 2-person podcast wide format across the clip
     two_face_frames = [f for f in all_face_centers if len(f) >= 2 and (f[-1] - f[0]) > (src_w * 0.25)]
     if len(two_face_frames) >= max(3, int(len(all_face_centers) * 0.35)):
-        # Podcast / 2-speaker split screen mode
         left_speakers = [f[0] for f in two_face_frames]
         right_speakers = [f[-1] for f in two_face_frames]
-
         median_left = int(np.median(left_speakers))
         median_right = int(np.median(right_speakers))
-
         logger.info(f"Detected 2 distinct speakers (left={median_left}, right={median_right}); generating podcast split-screen")
         plan = _make_split_screen_plan(src_w, src_h, median_left, median_right, target_w, target_h)
         plan.has_subtitles = has_existing_subs
         return plan
 
-    # Single-speaker tracking mode
-    primary_centers = [f[0] if len(f) == 1 else f[np.argmin(np.abs(np.array(f) - src_w // 2))] for f in all_face_centers]
-    median_x = int(np.median(primary_centers))
+    # 2. Dynamic Scene-Aware Framing: analyze camera shots
+    cut_timestamps.append(end_time)
+    cuts = sorted(list(set(cut_timestamps)))
+    shot_plans: list[ShotPlan] = []
+    default_plan = _make_single_plan(src_w, src_h, src_w // 2, target_w, target_h)
+    crop_w, crop_h, crop_y = default_plan.crop_w, default_plan.crop_h, default_plan.crop_y
 
+    for i in range(len(cuts) - 1):
+        t_start = cuts[i]
+        t_end = cuts[i + 1]
+        shot_samples = [s for s in samples if t_start <= s.time < t_end]
+        shot_faces = []
+        for s in shot_samples:
+            if s.faces:
+                p_face = s.faces[0] if len(s.faces) == 1 else s.faces[int(np.argmin(np.abs(np.array(s.faces) - src_w // 2)))]
+                shot_faces.append(p_face)
+
+        if shot_faces:
+            shot_median_x = int(np.median(shot_faces))
+        else:
+            shot_median_x = src_w // 2
+
+        shot_single = _make_single_plan(src_w, src_h, shot_median_x, target_w, target_h)
+        rel_start = max(0.0, t_start - start_seconds)
+        rel_end = max(rel_start + 0.1, t_end - start_seconds)
+
+        shot_plans.append(ShotPlan(
+            start_time=rel_start,
+            end_time=rel_end,
+            crop_x=shot_single.crop_x,
+            crop_y=crop_y,
+            crop_w=crop_w,
+            crop_h=crop_h,
+        ))
+
+    # Check if multiple shots actually have distinct framing (diff >= 8% of width)
+    distinct_positions = False
+    if len(shot_plans) > 1:
+        xs = [sp.crop_x for sp in shot_plans]
+        if (max(xs) - min(xs)) >= (src_w * 0.08):
+            distinct_positions = True
+
+    if distinct_positions:
+        shot_info = [(round(sp.start_time, 1), round(sp.end_time, 1), sp.crop_x) for sp in shot_plans]
+        logger.info(
+            f"AI Editor: detected {len(shot_plans)} camera shots in clip; applying dynamic multi-shot framing: {shot_info}",
+            extra={"stage": "face_tracker", "shots": shot_info}
+        )
+        plan = FramingPlan(
+            mode="dynamic",
+            has_subtitles=has_existing_subs,
+            crop_x=shot_plans[0].crop_x,
+            crop_y=crop_y,
+            crop_w=crop_w,
+            crop_h=crop_h,
+            shots=shot_plans,
+        )
+        return plan
+
+    # 3. Single-speaker tracking mode fallback
+    primary_centers = [f[0] if len(f) == 1 else f[int(np.argmin(np.abs(np.array(f) - src_w // 2)))] for f in all_face_centers]
+    median_x = int(np.median(primary_centers))
     logger.info(f"Detected single primary speaker at x={median_x}; generating centered smart track")
     plan = _make_single_plan(src_w, src_h, median_x, target_w, target_h)
     plan.has_subtitles = has_existing_subs
