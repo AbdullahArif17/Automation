@@ -222,7 +222,7 @@ def cut_segment(
         "-t", str(duration),
         "-filter_complex", crop_filter,
         "-c:v", "libx264",
-        "-preset", "medium",
+        "-preset", "fast",
         "-crf", "17",
         "-pix_fmt", "yuv420p",
         "-r", str(target_fps),
@@ -240,7 +240,7 @@ def cut_segment(
                 extra={"job_id": job_id, "stage": "cut", "status": "start"})
 
     def _run():
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         if result.returncode != 0:
             raise RuntimeError(f"ffmpeg cut failed: {result.stderr[-2000:]}")
         return result

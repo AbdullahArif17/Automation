@@ -71,7 +71,11 @@ def validate_cookies_file(cookies_path: Path, test_url: str = "https://www.youtu
     # Read and normalize line endings (CRLF -> LF)
     raw = cookies_path.read_bytes()
     normalized = raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
-    cookies_path.write_bytes(normalized)
+    if normalized != raw:
+        try:
+            cookies_path.write_bytes(normalized)
+        except OSError:
+            pass
 
     text = normalized.decode("utf-8", errors="replace")
     lines = text.split("\n")
@@ -100,13 +104,14 @@ def validate_cookies_file(cookies_path: Path, test_url: str = "https://www.youtu
         return cookie_count, False
 
     # Lightweight auth verification: try to fetch a page that requires login.
-    # /feed/subscriptions returns empty/redirect without valid cookies, so
-    # yt-dlp will fail or return no output if cookies are invalid/expired.
-    # Uses module-level YT_DLP_COMMON_ARGS for JS runtime, UA, and player_client.
+    # Uses a writable temporary copy so yt-dlp doesn't fail on read-only master cookies.
     auth_ok = False
+    temp_val_cookies = cookies_path.parent / f".val_{cookies_path.name}"
     try:
+        shutil.copyfile(cookies_path, temp_val_cookies)
+        temp_val_cookies.chmod(0o600)
         result = subprocess.run(
-            ["yt-dlp", *YT_DLP_COMMON_ARGS, "--cookies", str(cookies_path), "--skip-download",
+            ["yt-dlp", *YT_DLP_COMMON_ARGS, "--cookies", str(temp_val_cookies), "--skip-download",
              "--playlist-items", "1",
              "--print", "id", test_url],
             capture_output=True, text=True, timeout=60,
@@ -121,6 +126,12 @@ def validate_cookies_file(cookies_path: Path, test_url: str = "https://www.youtu
         logger.warning("Cookie auth check timed out (60s)")
     except Exception as exc:
         logger.warning(f"Cookie auth check error: {exc}")
+    finally:
+        if temp_val_cookies.exists():
+            try:
+                temp_val_cookies.unlink()
+            except Exception:
+                pass
 
     logger.info(f"Cookies validated: {cookie_count} data lines, auth_ok={auth_ok}")
     return cookie_count, auth_ok
@@ -395,30 +406,42 @@ def download_video_youtube(source: SourceVideo, dest_dir: Path) -> Path:
         video_url,
     ]
 
+    working_cookies = None
     if has_cookies:
-        # Insert cookies args right after YT_DLP_COMMON_ARGS
+        import shutil
+        # Copy to a temporary working cookie file so yt-dlp never overwrites or corrupts master cookies.txt
+        working_cookies = dest_dir / ".working_cookies.txt"
+        shutil.copyfile(cookies_path_str, working_cookies)
+        working_cookies.chmod(0o600)
         insert_idx = 1 + len(YT_DLP_COMMON_ARGS)
         cmd.insert(insert_idx, "--cookies")
-        cmd.insert(insert_idx + 1, cookies_path_str)
+        cmd.insert(insert_idx + 1, str(working_cookies))
 
-    # Retry on bot-detection (transient), capped at 2 attempts
-    last_err = ""
-    for attempt in range(2):
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=_subprocess_env())
-            if result.returncode == 0:
-                break
-            last_err = result.stderr[-2000:]
-            logger.debug(f"yt-dlp stderr for {source.yt_video_id}: {last_err}")
-            # Bot-detection is often transient; retry once
-            if "confirm you're not a bot" in last_err.lower() and attempt == 0:
-                logger.warning(f"yt-dlp bot-detection hit for {source.yt_video_id}, retrying")
-                continue
-            raise RuntimeError(f"yt-dlp failed: {last_err}")
-        except subprocess.TimeoutExpired:
-            raise RuntimeError(f"yt-dlp timed out downloading {source.yt_video_id}")
-    else:
-        raise RuntimeError(f"yt-dlp failed after retry: {last_err}")
+    try:
+        # Retry on bot-detection (transient), capped at 2 attempts
+        last_err = ""
+        for attempt in range(2):
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=_subprocess_env())
+                if result.returncode == 0:
+                    break
+                last_err = result.stderr[-2000:]
+                logger.debug(f"yt-dlp stderr for {source.yt_video_id}: {last_err}")
+                # Bot-detection is often transient; retry once
+                if "confirm you're not a bot" in last_err.lower() and attempt == 0:
+                    logger.warning(f"yt-dlp bot-detection hit for {source.yt_video_id}, retrying")
+                    continue
+                raise RuntimeError(f"yt-dlp failed: {last_err}")
+            except subprocess.TimeoutExpired:
+                raise RuntimeError(f"yt-dlp timed out downloading {source.yt_video_id}")
+        else:
+            raise RuntimeError(f"yt-dlp failed after retry: {last_err}")
+    finally:
+        if working_cookies and working_cookies.exists():
+            try:
+                working_cookies.unlink()
+            except Exception:
+                pass
 
     size = local_path.stat().st_size
     logger.info(f"downloaded youtube:{source.yt_video_id} -> {local_path} ({size} bytes)")
