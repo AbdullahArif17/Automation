@@ -35,11 +35,29 @@ logger = get_logger(__name__)
 # Note: Chrome UA removed — tv/android_vr clients use different UA strings; yt-dlp handles
 # client-appropriate UA automatically when player_client is specified.
 # Note: Using android and web clients because android_vr and tv often reject cookies.
-YT_DLP_COMMON_ARGS = [
-    "--js-runtimes", "deno",
-    "--remote-components", "ejs:github",
-    "--force-ipv6",
-]
+def _has_ipv6() -> bool:
+    """Check if this machine has an active IPv6 route to the internet."""
+    import socket
+    if os.getenv("FORCE_IPV6", "").lower() in ("1", "true", "yes"):
+        return True
+    try:
+        sock = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+        sock.connect(("2001:4860:4860::8888", 53))
+        sock.close()
+        return True
+    except Exception:
+        return False
+
+
+def _get_yt_dlp_common_args() -> list[str]:
+    """Return common yt-dlp arguments, adding --force-ipv6 only if IPv6 is routable."""
+    args = [
+        "--js-runtimes", "deno",
+        "--remote-components", "ejs:github",
+    ]
+    if _has_ipv6():
+        args.append("--force-ipv6")
+    return args
 
 
 def _subprocess_env() -> dict[str, str]:
@@ -111,7 +129,7 @@ def validate_cookies_file(cookies_path: Path, test_url: str = "https://www.youtu
         shutil.copyfile(cookies_path, temp_val_cookies)
         temp_val_cookies.chmod(0o600)
         result = subprocess.run(
-            ["yt-dlp", *YT_DLP_COMMON_ARGS, "--cookies", str(temp_val_cookies), "--skip-download",
+            ["yt-dlp", *_get_yt_dlp_common_args(), "--cookies", str(temp_val_cookies), "--skip-download",
              "--playlist-items", "1",
              "--print", "id", test_url],
             capture_output=True, text=True, timeout=60,
@@ -397,9 +415,10 @@ def download_video_youtube(source: SourceVideo, dest_dir: Path) -> Path:
     dest_dir.mkdir(parents=True, exist_ok=True)
     local_path = dest_dir / f"{source.yt_video_id}.mp4"
 
+    common_args = _get_yt_dlp_common_args()
     cmd = [
         "yt-dlp",
-        *YT_DLP_COMMON_ARGS,
+        *common_args,
         "-f", "bestvideo+bestaudio/best",
         "--merge-output-format", "mp4",
         "-o", str(local_path),
@@ -413,7 +432,7 @@ def download_video_youtube(source: SourceVideo, dest_dir: Path) -> Path:
         working_cookies = dest_dir / ".working_cookies.txt"
         shutil.copyfile(cookies_path_str, working_cookies)
         working_cookies.chmod(0o600)
-        insert_idx = 1 + len(YT_DLP_COMMON_ARGS)
+        insert_idx = 1 + len(common_args)
         cmd.insert(insert_idx, "--cookies")
         cmd.insert(insert_idx + 1, str(working_cookies))
 
