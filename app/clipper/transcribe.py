@@ -42,6 +42,11 @@ class TranscriptResult:
     segments: list[SegmentTimestamp]
     source_path: str
 
+    @property
+    def word_count(self) -> int:
+        """Total number of words across all segments."""
+        return sum(len(s.words) for s in self.segments)
+
     def to_json(self) -> str:
         return json.dumps({
             "language": self.language,

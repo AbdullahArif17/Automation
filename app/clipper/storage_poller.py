@@ -457,7 +457,7 @@ def download_video_youtube(source: SourceVideo, dest_dir: Path) -> Path:
         cmd[0] = yt_dlp_bin
         for attempt in range(2):
             try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=env)
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
                 if result.returncode == 0:
                     break
                 last_err = result.stderr[-2000:]
