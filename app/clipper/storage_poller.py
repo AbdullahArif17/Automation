@@ -537,19 +537,25 @@ def poll_and_clip(
         local_path = None
         try:
             local_path = download_fn(src, Path(pipeline.settings.clip_input_dir))
-            pipeline.run(
+            pipeline_result = pipeline.run(
                 str(local_path),
                 upload=upload,
                 max_clips=max_clips_per_video,
                 force_retranscribe=False,
             )
+            any_uploaded = any(o.published for o in pipeline_result.outcomes) if upload else True
             video_row = db.fetchone(
                 "SELECT id FROM videos WHERE topic=? ORDER BY created_at DESC LIMIT 1",
                 (f"clip:{local_path.stem}",),
             )
             if video_row:
                 mark_video_processed(db, src, local_path, video_row["id"])
-            results.append((src, True, None))
+            if upload and not any_uploaded:
+                clip_errors = [o.error for o in pipeline_result.outcomes if o.error]
+                err_msg = "; ".join(clip_errors) if clip_errors else "no clips were published"
+                results.append((src, False, err_msg))
+            else:
+                results.append((src, True, None))
         except Exception as exc:
             logger.error(f"clipper failed for {src.video_id}: {exc}")
             results.append((src, False, str(exc)))
