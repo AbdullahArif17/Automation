@@ -17,6 +17,7 @@ from typing import Optional
 
 import cv2
 import numpy as np
+import subprocess
 
 from app.utils.logging import get_logger
 
@@ -163,6 +164,25 @@ class FaceDetector:
         return faces
 
 
+def _extract_frame_ffmpeg(video_path: str, timestamp: float) -> Optional[np.ndarray]:
+    """Extract a single frame as a numpy BGR image using ffmpeg fallback when OpenCV decoding fails."""
+    try:
+        cmd = [
+            "ffmpeg", "-y", "-ss", f"{timestamp:.2f}",
+            "-i", video_path,
+            "-vframes", "1",
+            "-f", "image2",
+            "-c:v", "mjpeg",
+            "pipe:1",
+        ]
+        res = subprocess.run(cmd, capture_output=True, timeout=5)
+        if res.returncode == 0 and res.stdout:
+            return cv2.imdecode(np.frombuffer(res.stdout, np.uint8), cv2.IMREAD_COLOR)
+    except Exception:
+        pass
+    return None
+
+
 def analyze_clip_framing(
     video_path: str,
     start_seconds: float,
@@ -187,6 +207,7 @@ def analyze_clip_framing(
     subtitle_hits = 0
     current_time = start_seconds
     end_time = start_seconds + duration
+    consecutive_fails = 0
 
     # Sample frames across clip duration (e.g., every 0.5s)
     while current_time < end_time:
@@ -194,8 +215,17 @@ def analyze_clip_framing(
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
         ret, frame = cap.read()
         if not ret or frame is None:
-            break
+            # Fallback to ffmpeg for codecs (e.g. AV1 in WSL) where OpenCV fails
+            frame = _extract_frame_ffmpeg(video_path, current_time)
 
+        if frame is None:
+            consecutive_fails += 1
+            if consecutive_fails >= 5 and total_sampled == 0:
+                break
+            current_time += sample_interval
+            continue
+
+        consecutive_fails = 0
         total_sampled += 1
 
         # Resize for faster face detection (width=640)

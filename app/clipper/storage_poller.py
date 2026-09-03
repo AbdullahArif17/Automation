@@ -431,7 +431,7 @@ def download_video_youtube(source: SourceVideo, dest_dir: Path) -> Path:
     cmd = [
         "yt-dlp",
         *common_args,
-        "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
+        "-f", "bestvideo[vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
         "--merge-output-format", "mp4",
         "--postprocessor-args", "Merger:-c:a aac",
         "-o", str(local_path),
