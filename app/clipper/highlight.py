@@ -115,14 +115,28 @@ def parse_highlight_response(response: str, min_dur: float, max_dur: float, vide
 
     candidates = []
     for c in data["candidates"]:
-        # Validate required fields
-        for field in ("start_seconds", "end_seconds", "reason", "suggested_title", "suggested_description", "confidence"):
-            if field not in c:
-                raise ValueError(f"Candidate missing required field: {field}")
+        # Validate required fields (supporting common LLM aliases)
+        if "start_seconds" not in c and "start" not in c:
+            raise ValueError("Candidate missing required field: start_seconds")
+        if "end_seconds" not in c and "end" not in c:
+            raise ValueError("Candidate missing required field: end_seconds")
+        if "reason" not in c and "explanation" not in c and "why" not in c:
+            raise ValueError("Candidate missing required field: reason")
+        if "suggested_title" not in c and "title" not in c and "headline" not in c:
+            raise ValueError("Candidate missing required field: suggested_title")
+        if "suggested_description" not in c and "description" not in c and "summary" not in c:
+            raise ValueError("Candidate missing required field: suggested_description")
+        if "confidence" not in c and "score" not in c:
+            raise ValueError("Candidate missing required field: confidence")
 
-        start = float(c["start_seconds"])
-        end = float(c["end_seconds"])
+        start = float(c.get("start_seconds") if "start_seconds" in c else c["start"])
+        end = float(c.get("end_seconds") if "end_seconds" in c else c["end"])
         dur = end - start
+
+        # If slightly over max_dur (e.g. 60.5s or 63s), clamp to max_dur gracefully
+        if dur > max_dur and dur <= max_dur + 5.0:
+            end = start + max_dur
+            dur = max_dur
 
         # Validate duration bounds
         if not (min_dur <= dur <= max_dur):
@@ -135,24 +149,38 @@ def parse_highlight_response(response: str, min_dur: float, max_dur: float, vide
             logger.warning(f"candidate timestamps [{start}, {end}] outside video duration {video_duration}, skipping",
                            extra={"stage": "highlight", "status": "validation_fail"})
             continue
-            
-        c_mode = c.get("crop_mode", "center")
-        if c_mode not in ("center", "blur"):
-            c_mode = "center"
 
-        title = c["suggested_title"].strip()
+        # Extract title and description with flexible key fallbacks
+        title = (c.get("suggested_title") or c.get("title") or c.get("headline") or "").strip()
+        if not title:
+            title = "Viral Highlight Clip #shorts"
         if "#shorts" not in title.lower():
             if len(title) <= 92:
                 title = f"{title} #shorts"
         title = title[:100]
 
+        desc = (c.get("suggested_description") or c.get("description") or c.get("summary") or "").strip()
+        if not desc:
+            desc = f"{title}\n\nSubscribe for more daily clips! #shorts"
+
+        reason = c.get("reason") or c.get("explanation") or c.get("why") or "Standalone highlight"
+
+        try:
+            conf = float(c.get("confidence", 0.85))
+        except (ValueError, TypeError):
+            conf = 0.85
+
+        c_mode = c.get("crop_mode", "center")
+        if c_mode not in ("center", "blur"):
+            c_mode = "center"
+
         candidates.append(ClipCandidate(
             start_seconds=start,
             end_seconds=end,
-            reason=c["reason"],
+            reason=reason,
             suggested_title=title,
-            suggested_description=c["suggested_description"][:5000],
-            confidence=float(c["confidence"]),
+            suggested_description=desc[:5000],
+            confidence=conf,
             crop_mode=c_mode,
         ))
 
