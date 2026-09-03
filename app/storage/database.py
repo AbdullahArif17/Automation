@@ -108,7 +108,9 @@ CREATE TABLE IF NOT EXISTS videos (
     comments INTEGER DEFAULT 0,
     watch_time INTEGER DEFAULT 0,
     average_view_duration REAL DEFAULT 0,
-    source_type TEXT DEFAULT 'generated'  -- 'generated' | 'clipped'
+    source_type TEXT DEFAULT 'generated',  -- 'generated' | 'clipped'
+    source_etag TEXT,
+    source_size INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS publishing_jobs (
@@ -165,12 +167,6 @@ CREATE TABLE IF NOT EXISTS errors (
     error TEXT,
     created_at TEXT NOT NULL
 );
-
-CREATE INDEX IF NOT EXISTS idx_videos_source_etag ON videos(source_etag);
-CREATE INDEX IF NOT EXISTS idx_videos_topic ON videos(topic);
-CREATE INDEX IF NOT EXISTS idx_videos_youtube_id ON videos(youtube_video_id);
-CREATE INDEX IF NOT EXISTS idx_publishing_jobs_state ON publishing_jobs(state);
-CREATE INDEX IF NOT EXISTS idx_publishing_jobs_video_id ON publishing_jobs(video_id);
 """
 
 
@@ -218,6 +214,13 @@ class Database:
             self.conn.execute("ALTER TABLE videos ADD COLUMN source_size INTEGER")
             logger.info("migrated videos table: added source_size column",
                         extra={"stage": "database", "status": "migrated"})
+
+        # Create performance indexes safely after tables and columns exist
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_videos_source_etag ON videos(source_etag)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_videos_topic ON videos(topic)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_videos_youtube_id ON videos(youtube_video_id)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_publishing_jobs_state ON publishing_jobs(state)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_publishing_jobs_video_id ON publishing_jobs(video_id)")
 
         self.conn.commit()
 
