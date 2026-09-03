@@ -76,10 +76,20 @@ class DailyRunner:
 
         niche = os.getenv("TOPIC_NICHE")
         if niche:
-            # If the user specified a custom niche, brainstorm a random unique topic idea
-            prompt = f"Brainstorm a highly specific, viral YouTube Short video title about: {niche}. Make it extremely unique and different from obvious topics. Just return the title string, nothing else. Example: 'The weirdest football match ever played in space'."
-            topic = self.pipeline.provider.generate(prompt).strip(' "\'')
-            logger.info(f"scheduler: generated niche topic '{topic}' from '{niche}'",
+            clean_niche = niche.strip(' "\'')
+            niche_list = [n.strip(' "\'') for n in clean_niche.split("|") if n.strip(' "\'')]
+            selected_niche = random.choice(niche_list) if niche_list else clean_niche
+            prompt = (
+                f"You are a viral YouTube Shorts creative director. "
+                f"Brainstorm ONE specific, true, and mind-blowing story topic within the niche: '{selected_niche}'. "
+                f"It MUST focus on a real event, person, discovery, or crazy moment that has clear context, high stakes, and a surprising twist. "
+                f"Avoid generic or vague topics like 'Top 5 moments' or 'General tips'. "
+                f"Instead, pick a specific true story, for example: 'The 1998 football match where a team had to score an own goal to advance' "
+                f"or 'The mathematician who proved a casino was cheating using physics'. "
+                f"Return ONLY the concise topic title string (max 80 chars), with no quotes or extra text."
+            )
+            topic = self.pipeline.provider.generate(prompt).strip(' "\'*\n')
+            logger.info(f"scheduler: selected niche '{selected_niche}', brainstormed topic '{topic}'",
                         extra={"stage": "scheduler", "status": "topic_from_niche"})
             return topic
 

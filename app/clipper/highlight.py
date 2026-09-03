@@ -53,8 +53,10 @@ def build_highlight_prompt(transcript: TranscriptResult, min_dur: float, max_dur
     for seg in transcript.segments:
         full_text += f"[{seg.start:.1f}-{seg.end:.1f}] {seg.text}\n"
 
-    return f"""You are an expert YouTube Shorts editor. Given the transcript below with timestamps,
-identify 1-3 segments that would make compelling standalone Shorts (vertical videos 20-60 seconds).
+    return f"""You are an elite YouTube Shorts curator and viral video editor.
+Given the timestamped transcript below from a long-form video, identify 1-3 segments that will make powerful, self-contained standalone Shorts (20-60 seconds).
+
+The most important rule: ANY VIEWER who has never seen this podcast or video before MUST immediately understand the context within the first 3 seconds. The clip must feel like a complete, satisfying mini-story or argument, NOT a random chopped fragment.
 
 SOURCE VIDEO DURATION: {transcript.duration:.1f} seconds
 TARGET SHORT DURATION: {min_dur:.0f}-{max_dur:.0f} seconds
@@ -68,25 +70,30 @@ Return ONLY valid JSON matching this exact schema:
     {{
       "start_seconds": <float>,
       "end_seconds": <float>,
-      "reason": "<why this segment works as a standalone Short>",
-      "suggested_title": "<highly optimized SEO title, curiosity gap hook, max 60 chars>",
-      "suggested_description": "<2 sentences heavily packed with high-volume search keywords + 'Subscribe for more!' + 4 highly specific #hashtags + #shorts>",
+      "reason": "<explain the context, who is speaking, what the core idea/punchline is, and why it works as a standalone Short>",
+      "suggested_title": "<high-curiosity hook naming the person/subject, max 60 chars>",
+      "suggested_description": "<2 context-rich sentences explaining who is talking and what happened + high-volume search keywords + 'Subscribe for more!' + 4 specific #hashtags + #shorts>",
       "confidence": <0.0-1.0>,
       "crop_mode": "<'center' or 'blur'>"
     }}
   ]
 }}
 
-Rules:
-- Each candidate duration MUST be between {min_dur:.0f} and {max_dur:.0f} seconds
-- Start/end times must exist in the transcript
-- Prefer segments with: clear hook, complete thought, visual potential, self-contained
-- Reject segments that need context from earlier/later parts
-- For suggested_title: Use click-worthy hooks ("The truth about...", "Why...") and front-load keywords. MUST be under 60 chars.
-- For suggested_description: Front-load high-search keywords, end with Subscribe CTA and exactly 5 hashtags (including #shorts).
-- For crop_mode: Choose 'center' for immersive full-screen (best for football, podcasts, centered subjects). Choose 'blur' if it's gaming, UI-heavy, or you suspect the subject is on the edge of the screen, as this preserves the entire 16:9 frame.
-- confidence: your estimate of how well this will perform as a Short
-- Return 1-3 candidates, best first
+STRICT QUALITY RULES:
+1. CLEAN CONTEXTUAL START (CRITICAL):
+   - The clip MUST start at the beginning of a sentence where the speaker introduces a topic, thought, or story.
+   - STRICTLY BANNED: Never start mid-sentence or with dangling pronouns/conjunctions without referents (e.g., do NOT start with "And so he told me...", "Because of that...", "So basically...", or "Yeah exactly").
+2. STANDALONE COMPLETION (CRITICAL):
+   - The clip MUST finish at the natural end of a sentence delivering the payoff, punchline, debate conclusion, or reaction.
+   - NEVER cut off mid-sentence or right before the climax.
+3. CONTEXT-RICH TITLE:
+   - Must explicitly name the person, topic, or conflict (e.g., 'Joe Rogan on the 1994 Own Goal Match' or 'Ronaldo Explains Why He Left'). Max 60 chars.
+4. HIGH-RETENTION DURATION:
+   - Duration MUST be between {min_dur:.0f} and {max_dur:.0f} seconds.
+5. CROP MODE:
+   - Use 'center' for interviews, podcasts, football, and centered subjects.
+   - Use 'blur' for gaming or wide group panels where edges matter.
+6. Return 1-3 candidates, best first.
 """
 
 

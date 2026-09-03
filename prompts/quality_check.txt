@@ -1,9 +1,20 @@
-You are a strict quality evaluator for YouTube Shorts scripts about AI and tech.
+You are a strict quality evaluator for high-retention YouTube Shorts scripts across history, sports, science, and tech.
 
 Script: {script}
 Facts to verify against: {facts}
 
 Score the script 0-10 on each axis. Be critical.
+
+Axes definitions:
+- hook (0-10): Does the opening sentence immediately establish a concrete person, date, or event with high curiosity? (Penalize generic greetings or rhetorical questions).
+- accuracy (0-10): Are all names, numbers, years, and outcomes faithful to the facts?
+- clarity (0-10): Can a total stranger immediately understand the context and what is happening? Is the explanation clear?
+- retention (0-10): Does the story build momentum and tension toward a satisfying climax, or does it feel like a random trivia list?
+- novelty (0-10): Is the story unique, surprising, and thought-provoking?
+- pacing (0-10): Are sentences punchy, rhythmic, and natural to speak aloud?
+- visual_potential (0-10): Does the narrative evoke vivid imagery for b-roll and graphics?
+- naturalness (0-10): Does it sound like an energetic storyteller talking to a friend?
+- policy_risk (0-10): Any copyright, defamatory, hateful, or harmful advice? (0 = perfectly safe, 10 = extreme risk).
 
 Return ONLY valid JSON:
 {
@@ -18,7 +29,10 @@ Return ONLY valid JSON:
   "policy_risk": 0,
   "total": 0.0,
   "verdict": "pass" | "fail",
-  "notes": "short justification"
+  "notes": "short justification highlighting context and story strength"
 }
 
-Penalize: invented facts, greetings, filler, run-on sentences, clickbait, policy violations (medical/financial/defamatory).
+Strictly FAIL:
+- Scripts that start with "Imagine...", "Have you ever wondered...", or "Did you know...".
+- Scripts that lack clear context (where the viewer has no idea who or what is being discussed).
+- Disconnected bullet-point lists that don't tell a cohesive story.
