@@ -61,12 +61,22 @@ def _get_yt_dlp_common_args() -> list[str]:
 
 
 def _subprocess_env() -> dict[str, str]:
-    """Return env dict with ~/.deno/bin injected into PATH so yt-dlp can find Deno."""
+    """Return env dict with ~/.deno/bin and python directory injected into PATH so yt-dlp and Deno are always found."""
+    import sys
     env = os.environ.copy()
+    paths = []
     deno_bin = os.path.join(os.path.expanduser("~"), ".deno", "bin")
+    if os.path.isdir(deno_bin):
+        paths.append(deno_bin)
+    py_dir = os.path.dirname(sys.executable)
+    if py_dir and os.path.isdir(py_dir):
+        paths.append(py_dir)
     current_path = env.get("PATH", "")
-    if deno_bin not in current_path:
-        env["PATH"] = f"{deno_bin}:{current_path}"
+    sep = ";" if sys.platform == "win32" else ":"
+    for p in paths:
+        if p not in current_path.split(sep):
+            current_path = f"{p}{sep}{current_path}" if current_path else p
+    env["PATH"] = current_path
     return env
 
 
@@ -116,7 +126,9 @@ def validate_cookies_file(cookies_path: Path, test_url: str = "https://www.youtu
         raise ValueError("No valid cookie data lines found (only comments/blanks)")
 
     # Check if yt-dlp is available before attempting auth check
-    if not shutil.which("yt-dlp"):
+    env = _subprocess_env()
+    yt_dlp_bin = shutil.which("yt-dlp", path=env.get("PATH"))
+    if not yt_dlp_bin:
         logger.warning("yt-dlp not found in PATH; skipping cookie auth check (format validation passed)")
         logger.info(f"Cookies validated: {cookie_count} data lines, auth_ok=False (yt-dlp unavailable)")
         return cookie_count, False
@@ -129,11 +141,11 @@ def validate_cookies_file(cookies_path: Path, test_url: str = "https://www.youtu
         shutil.copyfile(cookies_path, temp_val_cookies)
         temp_val_cookies.chmod(0o600)
         result = subprocess.run(
-            ["yt-dlp", *_get_yt_dlp_common_args(), "--cookies", str(temp_val_cookies), "--skip-download",
+            [yt_dlp_bin, *_get_yt_dlp_common_args(), "--cookies", str(temp_val_cookies), "--skip-download",
              "--playlist-items", "1",
              "--print", "id", test_url],
             capture_output=True, text=True, timeout=60,
-            env=_subprocess_env()
+            env=env
         )
         if result.returncode == 0 and result.stdout.strip():
             auth_ok = True
@@ -439,9 +451,12 @@ def download_video_youtube(source: SourceVideo, dest_dir: Path) -> Path:
     try:
         # Retry on bot-detection (transient), capped at 2 attempts
         last_err = ""
+        env = _subprocess_env()
+        yt_dlp_bin = shutil.which("yt-dlp", path=env.get("PATH")) or "yt-dlp"
+        cmd[0] = yt_dlp_bin
         for attempt in range(2):
             try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=_subprocess_env())
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=env)
                 if result.returncode == 0:
                     break
                 last_err = result.stderr[-2000:]
