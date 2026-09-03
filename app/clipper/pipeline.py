@@ -123,6 +123,12 @@ class ClipperPipeline:
             )
             self.db.set_job_state(job_db_id, JobState.RESEARCHED, stage="transcribe")
 
+            # Skip videos without meaningful dialogue (e.g., music/fail compilations)
+            if transcript.word_count < 30:
+                msg = f"Insufficient spoken dialogue ({transcript.word_count} words in {transcript.duration:.0f}s); skipping non-verbal video"
+                logger.warning(msg, extra={"job_id": jid, "stage": "transcribe", "status": "insufficient_speech"})
+                raise RuntimeError(msg)
+
             # 2. Select highlights
             self.db.set_job_state(job_db_id, JobState.SCRIPTING, stage="highlight")
             candidates = select_highlights(

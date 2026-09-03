@@ -88,8 +88,9 @@ STRICT QUALITY RULES:
    - NEVER cut off mid-sentence or right before the climax.
 3. CONTEXT-RICH TITLE:
    - Must explicitly name the person, topic, or conflict (e.g., 'Joe Rogan on the 1994 Own Goal Match' or 'Ronaldo Explains Why He Left'). Max 60 chars.
-4. HIGH-RETENTION DURATION:
-   - Duration MUST be between {min_dur:.0f} and {max_dur:.0f} seconds.
+4. STRICT DURATION BOUNDS (CRITICAL):
+   - Duration MUST be between {min_dur:.0f} and {max_dur:.0f} seconds (end_seconds - start_seconds >= {min_dur:.0f} and <= {max_dur:.0f}).
+   - STRICTLY BANNED: Snippets under {min_dur:.0f} seconds (e.g. 10s or 15s) are too short and will be rejected. Snippets over {max_dur:.0f}s cannot be Shorts.
 5. CROP MODE:
    - Use 'center' for interviews, podcasts, football, and centered subjects.
    - Use 'blur' for gaming or wide group panels where edges matter.
