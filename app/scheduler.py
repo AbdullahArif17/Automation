@@ -80,12 +80,11 @@ class DailyRunner:
             niche_list = [n.strip(' "\'') for n in clean_niche.split("|") if n.strip(' "\'')]
             selected_niche = random.choice(niche_list) if niche_list else clean_niche
             prompt = (
-                f"You are a viral YouTube Shorts creative director. "
+                f"You are a viral YouTube Shorts creative director targeting high-CPM audiences in the US, UK, and Canada. "
                 f"Brainstorm ONE specific, true, and mind-blowing story topic within the niche: '{selected_niche}'. "
                 f"It MUST focus on a real event, person, discovery, or crazy moment that has clear context, high stakes, and a surprising twist. "
+                f"Prioritize stories that captivate Western audiences (e.g., famous innovators, crazy American/British historical events, Wall Street intrigues, declassified operations, or major space breakthroughs). "
                 f"Avoid generic or vague topics like 'Top 5 moments' or 'General tips'. "
-                f"Instead, pick a specific true story, for example: 'The 1998 football match where a team had to score an own goal to advance' "
-                f"or 'The mathematician who proved a casino was cheating using physics'. "
                 f"Return ONLY the concise topic title string (max 80 chars), with no quotes or extra text."
             )
             topic = self.pipeline.provider.generate(prompt).strip(' "\'*\n')

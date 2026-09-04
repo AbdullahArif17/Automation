@@ -39,7 +39,7 @@ jobs:
       TTS_PROVIDER: edge-tts
       MEDIA_PROVIDER: free
       DATABASE_URL: sqlite:///data/app.db
-      TOPIC_NICHE: "mind blowing space and science mysteries"
+      TOPIC_NICHE: "mind blowing space and science mysteries | crazy american history and bizarre laws | unbelievable wall street and silicon valley heists | shocking secret government experiments and inventions | wildest courtroom moments that shocked the judge"
       # Optional free-tier media APIs for asset resilience (fallback chain)
       PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
       PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}

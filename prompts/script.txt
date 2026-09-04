@@ -27,6 +27,9 @@ Story Architecture (The 4-Part Arc):
    - Always end exactly with: "Subscribe for more!"
 
 Writing Rules:
+- Target Audience: Native English speakers in the United States, Canada, and the United Kingdom (high-CPM demographic).
+- American English: Use standard American English spelling and phrasing (e.g., 'realize', 'color', 'defense').
+- Currency & Units: Always express money in US Dollars ($) and measurements in Imperial units (miles, feet, pounds) to match US/UK/Canada listening habits.
 - Crystal-clear context: A 12-year-old or someone who knows nothing about this topic must fully understand what happened.
 - Write for the ear: Short punchy sentences, rhythmic cadence, conversational and energetic delivery.
 - High factual density: Use the real names, numbers, years, and locations from the facts.

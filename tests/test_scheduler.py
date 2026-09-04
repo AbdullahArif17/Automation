@@ -1,4 +1,5 @@
 """Phase 12 tests: scheduler components."""
+import os
 from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -45,18 +46,19 @@ def test_daily_runner_pick_topic_fallback(tmp_path):
 
     runner = DailyRunner(pipeline=pipeline, posts_per_day=2, max_generations=2)
 
-    # No analytics, no candidates -> None
-    with patch("app.research.sources.discover_candidates", return_value=[]):
-        assert runner._pick_topic() is None
+    with patch.dict(os.environ, {"TOPIC_NICHE": ""}):
+        # No analytics, no candidates -> None
+        with patch("app.research.sources.discover_candidates", return_value=[]):
+            assert runner._pick_topic() is None
 
-    # With candidates but selector returns None -> fallback to first candidate
-    cand = MagicMock()
-    cand.title = "fallback topic"
-    with patch("app.research.sources.discover_candidates", return_value=[cand]):
-        with patch("app.content.topic_selector.TopicSelector") as mock_selector:
-            mock_selector.return_value.select_best.return_value = None
-            topic = runner._pick_topic()
-            assert topic == "fallback topic"
+        # With candidates but selector returns None -> fallback to first candidate
+        cand = MagicMock()
+        cand.title = "fallback topic"
+        with patch("app.research.sources.discover_candidates", return_value=[cand]):
+            with patch("app.content.topic_selector.TopicSelector") as mock_selector:
+                mock_selector.return_value.select_best.return_value = None
+                topic = runner._pick_topic()
+                assert topic == "fallback topic"
 
 
 def test_install_cron_outputs_entry(capsys):
@@ -68,11 +70,11 @@ def test_install_cron_outputs_entry(capsys):
 
 
 def test_install_windows_task_no_crash():
-    # Just verify it doesn't crash; actual schtasks needs admin
+    # Just verify it doesn't crash; actual schtasks needs admin (2 gen + 2 clip tasks)
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0)
         install_windows_task()
-        assert mock_run.call_count == 2
+        assert mock_run.call_count == 4
 
 
 def test_scheduler_run_loop_calls_run_once(tmp_path):

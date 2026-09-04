@@ -310,11 +310,13 @@ def list_new_videos_youtube(
     items_to_process = []
     
     if search_query:
-        # Fetch search results
+        # Fetch search results targeted to US English audience
         data = _youtube_api_request("search", {
             "part": "snippet",
             "q": search_query,
             "type": "video",
+            "regionCode": "US",
+            "relevanceLanguage": "en",
             "maxResults": 50,
         })
         items_to_process = data.get("items", [])

@@ -63,6 +63,8 @@ class YouTubeUploader:
                 "description": description,
                 "tags": tags[:500],
                 "categoryId": category_id,
+                "defaultLanguage": "en-US",
+                "defaultAudioLanguage": "en-US",
             },
             "status": {"privacyStatus": privacy_status, "selfDeclaredMadeForKids": False},
         }

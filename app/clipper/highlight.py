@@ -60,6 +60,7 @@ The most important rule: ANY VIEWER who has never seen this podcast or video bef
 
 SOURCE VIDEO DURATION: {transcript.duration:.1f} seconds
 TARGET SHORT DURATION: {min_dur:.0f}-{max_dur:.0f} seconds
+TARGET AUDIENCE: United States, Canada, and United Kingdom. Prioritize moments that grip Western audiences: recognizable celebrities, entrepreneurs, intense debates, shocking admissions, or universally relatable humor.
 
 TRANSCRIPT:
 {full_text}

@@ -13,8 +13,9 @@ Return ONLY valid JSON:
 }
 
 Title rules (pick the best 3, max 60 chars each):
+- Target Audience: United States, Canada, and United Kingdom viewers (high-CPM Tier-1 demographic).
 - Make it a hook: curiosity gap ("Why..."), extreme outcome, or specific shocking number.
-- Front-load the most searchable keywords based on the topic.
+- Front-load the most searchable keywords in American English (e.g., "$100M", "Silicon Valley", "Secret").
 - Avoid boring, generic restatements of the topic — make it irresistible.
 - Match highly-searched patterns: "The truth about X", "Why X is secretly Y", "Stop doing X".
 
