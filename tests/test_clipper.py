@@ -562,5 +562,95 @@ def test_build_caption_track_from_whisper_with_smart_subtitles():
     assert any("SUBSCRIBE FOR MORE!" in line.text for line in track.lines)
 
 
+def test_detect_hardcoded_subtitles_static_object(tmp_path):
+    """Static objects like laptops or logos should NOT be detected as subtitles."""
+    import cv2
+    import numpy as np
+    from app.clipper.cut import detect_hardcoded_subtitles
+
+    video_path = str(tmp_path / "static_laptop.mp4")
+    writer = cv2.VideoWriter(video_path, cv2.VideoWriter_fourcc(*"mp4v"), 10.0, (640, 360))
+    for _ in range(30):
+        frame = np.zeros((360, 640, 3), dtype=np.uint8)
+        # Static bright logo/box in lower third
+        cv2.rectangle(frame, (200, 250), (440, 280), (255, 255, 255), -1)
+        writer.write(frame)
+    writer.release()
+
+    has_subs = detect_hardcoded_subtitles(video_path, start_time=0.0, duration=3.0)
+    assert has_subs is False
+
+
+def test_detect_hardcoded_subtitles_dynamic_subtitles(tmp_path):
+    """Dynamic changing subtitles in lower third should be detected."""
+    import cv2
+    import numpy as np
+    from app.clipper.cut import detect_hardcoded_subtitles
+
+    video_path = str(tmp_path / "dynamic_subs.mp4")
+    writer = cv2.VideoWriter(video_path, cv2.VideoWriter_fourcc(*"mp4v"), 10.0, (640, 360))
+    words = ["HELLO WORLD", "SUBTITLES HERE", "TESTING DETECTION"]
+    for i in range(30):
+        frame = np.zeros((360, 640, 3), dtype=np.uint8)
+        word = words[(i // 10) % len(words)]
+        cv2.putText(frame, word, (150, 270), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
+        writer.write(frame)
+    writer.release()
+
+    has_subs = detect_hardcoded_subtitles(video_path, start_time=0.0, duration=3.0)
+    assert has_subs is True
+
+
+def test_cut_segment_subtitle_burn_modes():
+    """Verify cut_segment respects CLIP_BURN_SUBTITLES=never, always, auto."""
+    from unittest.mock import patch, MagicMock
+    from app.clipper.cut import cut_segment
+    from app.clipper.highlight import ClipCandidate
+
+    cand = ClipCandidate(
+        start_seconds=10.0,
+        end_seconds=30.0,
+        reason="test",
+        suggested_title="t",
+        suggested_description="d",
+        confidence=0.9,
+    )
+
+    with patch("app.clipper.cut.check_ffmpeg", return_value=True), \
+         patch("app.clipper.cut.get_video_info", return_value=(1920, 1080, 60.0, 30.0)), \
+         patch("app.clipper.cut.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        # 1. CLIP_BURN_SUBTITLES=never
+        with patch.dict("os.environ", {"CLIP_BURN_SUBTITLES": "never"}):
+            cut_segment("dummy.mp4", cand, "out.mp4", ass_path="subs.ass")
+            args = mock_run.call_args[0][0]
+            f = args[args.index("-filter_complex") + 1]
+            assert "subtitles=" not in f
+
+        # 2. CLIP_BURN_SUBTITLES=always
+        with patch.dict("os.environ", {"CLIP_BURN_SUBTITLES": "always"}):
+            cut_segment("dummy.mp4", cand, "out.mp4", ass_path="subs.ass")
+            args = mock_run.call_args[0][0]
+            f = args[args.index("-filter_complex") + 1]
+            assert "subtitles=" in f
+
+        # 3. CLIP_BURN_SUBTITLES=auto with pre-existing subtitles -> skip burn
+        with patch.dict("os.environ", {"CLIP_BURN_SUBTITLES": "auto"}), \
+             patch("app.clipper.cut.detect_hardcoded_subtitles", return_value=True):
+            cut_segment("dummy.mp4", cand, "out.mp4", ass_path="subs.ass")
+            args = mock_run.call_args[0][0]
+            f = args[args.index("-filter_complex") + 1]
+            assert "subtitles=" not in f
+
+        # 4. CLIP_BURN_SUBTITLES=auto without pre-existing subtitles -> burn subs
+        with patch.dict("os.environ", {"CLIP_BURN_SUBTITLES": "auto"}), \
+             patch("app.clipper.cut.detect_hardcoded_subtitles", return_value=False):
+            cut_segment("dummy.mp4", cand, "out.mp4", ass_path="subs.ass")
+            args = mock_run.call_args[0][0]
+            f = args[args.index("-filter_complex") + 1]
+            assert "subtitles=" in f
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
