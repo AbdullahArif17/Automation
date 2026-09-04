@@ -203,13 +203,24 @@ class ClipperPipeline:
                                        extra={"job_id": jid, "stage": "duplicate", "status": "duplicate"})
                         # Don't fail - just log. User can decide to upload or not.
 
-                    # Update video row with this clip's info (first successful clip becomes primary)
+                    # Record this clip in videos table (each clip gets its own tracked record)
                     if idx == 0:
+                        clip_vid = video_id
                         self.db.execute(
                             "UPDATE videos SET title=?, description=?, video_path=?, status=? WHERE id=?",
                             (candidate.suggested_title, candidate.suggested_description,
-                             cut_result.output_path, JobState.READY.value, video_id),
+                             cut_result.output_path, JobState.READY.value, clip_vid),
                         )
+                    else:
+                        clip_vid = self.db.insert("videos", {
+                            "topic": f"clip:{source.stem}:{idx+1}",
+                            "title": candidate.suggested_title,
+                            "description": candidate.suggested_description,
+                            "video_path": cut_result.output_path,
+                            "status": JobState.READY.value,
+                            "source_type": "clipped",
+                            "created_at": _now(),
+                        })
 
                     # Upload if requested
                     published = False
@@ -217,7 +228,7 @@ class ClipperPipeline:
                     if upload:
                         self.db.set_job_state(job_db_id, JobState.UPLOADING, stage=f"upload_{idx+1}")
                         published, yt_id = self._upload_clip(
-                            video_id, job_db_id, candidate, cut_result.output_path
+                            clip_vid, job_db_id, candidate, cut_result.output_path
                         )
                         clip_outcome.published = published
                         clip_outcome.youtube_video_id = yt_id

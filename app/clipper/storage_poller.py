@@ -348,9 +348,9 @@ def list_new_videos_youtube(
         if not yt_video_id or yt_video_id in processed:
             continue
 
-        # Get video details to check duration (filter out Shorts < 60s)
+        # Get video details to check duration and view statistics (filter out Shorts < 60s and dead videos)
         vdata = _youtube_api_request("videos", {
-            "part": "contentDetails,snippet",
+            "part": "contentDetails,snippet,statistics",
             "id": yt_video_id,
         })
         vitems = vdata.get("items", [])
@@ -369,9 +369,18 @@ def list_new_videos_youtube(
         title = v["snippet"].get("title", "Untitled")
         title_lower = title.lower()
 
-        # Skip pre-existing Shorts (<120s) and skip overly long multi-hour videos (>1500s / 25 min)
-        if duration_secs < 120 or duration_secs > 1500 or "#shorts" in title_lower or "#short" in title_lower or "#tiktok" in title_lower:
-            logger.info(f"Skipping video outside 2m-25m range ({duration_secs}s): {title}")
+        # Configurable source video duration (default 2m to 90m to cover full podcasts)
+        min_src_dur = int(os.getenv("CLIP_SOURCE_MIN_DURATION", "120"))
+        max_src_dur = int(os.getenv("CLIP_SOURCE_MAX_DURATION", "5400"))
+        if duration_secs < min_src_dur or duration_secs > max_src_dur or "#shorts" in title_lower or "#short" in title_lower or "#tiktok" in title_lower:
+            logger.info(f"Skipping video outside {min_src_dur//60}m-{max_src_dur//60}m range ({duration_secs}s): {title}")
+            continue
+
+        # Filter out dead videos with low view counts (ensures source content is proven)
+        min_views = int(os.getenv("CLIP_MIN_SOURCE_VIEWS", "5000"))
+        views = int(v.get("statistics", {}).get("viewCount", 0))
+        if min_views > 0 and views < min_views:
+            logger.info(f"Skipping low-view video ({views} < {min_views} views): {title}")
             continue
         new_videos.append(SourceVideo(
             source_type="youtube",

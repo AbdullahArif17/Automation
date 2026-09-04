@@ -384,6 +384,7 @@ def cut_segment(
         "-crf", "17",
         "-pix_fmt", "yuv420p",
         "-r", str(target_fps),
+        "-af", "loudnorm=I=-14:LRA=7:TP=-1.5",
         "-c:a", "aac",
         "-b:a", "192k",
         "-ar", "48000",

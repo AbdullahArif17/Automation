@@ -54,12 +54,12 @@ def build_highlight_prompt(transcript: TranscriptResult, min_dur: float, max_dur
         full_text += f"[{seg.start:.1f}-{seg.end:.1f}] {seg.text}\n"
 
     return f"""You are an elite YouTube Shorts curator and viral video editor.
-Given the timestamped transcript below from a long-form video, identify 1-3 segments that will make powerful, self-contained standalone Shorts (20-60 seconds).
+Given the timestamped transcript below from a long-form video, identify 1-3 segments that will make powerful, self-contained standalone Shorts (25-45 seconds is the sweet spot).
 
-The most important rule: ANY VIEWER who has never seen this podcast or video before MUST immediately understand the context within the first 3 seconds. The clip must feel like a complete, satisfying mini-story or argument, NOT a random chopped fragment.
+The most important rule: ANY VIEWER who has never seen this podcast or video before MUST be hooked within the first 3 seconds. The clip must feel like a complete, satisfying mini-story or argument, NOT a random chopped fragment.
 
 SOURCE VIDEO DURATION: {transcript.duration:.1f} seconds
-TARGET SHORT DURATION: {min_dur:.0f}-{max_dur:.0f} seconds
+TARGET SHORT DURATION: {min_dur:.0f}-{max_dur:.0f} seconds (optimal: 25-45s)
 TARGET AUDIENCE: United States, Canada, and United Kingdom. Prioritize moments that grip Western audiences: recognizable celebrities, entrepreneurs, intense debates, shocking admissions, or universally relatable humor.
 
 TRANSCRIPT:
@@ -72,7 +72,7 @@ Return ONLY valid JSON matching this exact schema:
       "start_seconds": <float>,
       "end_seconds": <float>,
       "reason": "<explain the context, who is speaking, what the core idea/punchline is, and why it works as a standalone Short>",
-      "suggested_title": "<high-curiosity hook naming the person/subject, max 60 chars>",
+      "suggested_title": "<punchy curiosity hook naming person/topic, max 50 chars for mobile>",
       "suggested_description": "<2 context-rich sentences explaining who is talking and what happened + high-volume search keywords + 'Subscribe for more!' + 4 specific #hashtags + #shorts>",
       "confidence": <0.0-1.0>,
       "crop_mode": "<'center' or 'blur'>"
@@ -81,19 +81,20 @@ Return ONLY valid JSON matching this exact schema:
 }}
 
 STRICT QUALITY RULES:
-1. CLEAN CONTEXTUAL START (CRITICAL):
-   - The clip MUST start at the beginning of a sentence where the speaker introduces a topic, thought, or story.
-   - STRICTLY BANNED: Never start mid-sentence or with dangling pronouns/conjunctions without referents (e.g., do NOT start with "And so he told me...", "Because of that...", "So basically...", or "Yeah exactly").
+1. THE 3-SECOND HOOK (CRITICAL):
+   - The first sentence spoken MUST be an instant hook: a surprising claim, dramatic question, paradox, or intense emotion.
+   - STRICTLY BANNED: Never start with conversational runway like 'Well...', 'You know...', 'So basically...', 'In my opinion...', 'And so...', or polite small talk. The viewer must be stopped from swiping within the first 2 seconds.
 2. STANDALONE COMPLETION (CRITICAL):
    - The clip MUST finish at the natural end of a sentence delivering the payoff, punchline, debate conclusion, or reaction.
    - NEVER cut off mid-sentence or right before the climax.
-3. CONTEXT-RICH TITLE:
-   - Must explicitly name the person, topic, or conflict (e.g., 'Joe Rogan on the 1994 Own Goal Match' or 'Ronaldo Explains Why He Left'). Max 60 chars.
+3. MOBILE-OPTIMIZED TITLE:
+   - Must explicitly name the person, topic, or conflict (e.g., 'Joe Rogan on the 1994 Own Goal' or 'Ronaldo Explains Why He Left').
+   - Keep under 50 chars so the title is never cut off by '...' on mobile screens.
 4. STRICT DURATION BOUNDS (CRITICAL):
-   - Duration MUST be between {min_dur:.0f} and {max_dur:.0f} seconds (end_seconds - start_seconds >= {min_dur:.0f} and <= {max_dur:.0f}).
-   - STRICTLY BANNED: Snippets under {min_dur:.0f} seconds (e.g. 10s or 15s) are too short and will be rejected. Snippets over {max_dur:.0f}s cannot be Shorts.
+   - Duration MUST be between {min_dur:.0f} and {max_dur:.0f} seconds (optimal sweet spot is 28-45s for 80%+ completion rate).
+   - Snippets under {min_dur:.0f}s or over {max_dur:.0f}s will be rejected.
 5. CROP MODE:
-   - Use 'center' for interviews, podcasts, football, and centered subjects.
+   - Use 'center' for interviews, podcasts, gym, and centered subjects.
    - Use 'blur' for gaming or wide group panels where edges matter.
 6. Return 1-3 candidates, best first.
 """
@@ -155,11 +156,10 @@ def parse_highlight_response(response: str, min_dur: float, max_dur: float, vide
         # Extract title and description with flexible key fallbacks
         title = (c.get("suggested_title") or c.get("title") or c.get("headline") or "").strip()
         if not title:
-            title = "Viral Highlight Clip #shorts"
-        if "#shorts" not in title.lower():
-            if len(title) <= 92:
-                title = f"{title} #shorts"
-        title = title[:100]
+            title = "Viral Highlight Clip"
+        if "#shorts" not in title.lower() and len(title) <= 45:
+            title = f"{title} #shorts"
+        title = title[:60].strip()
 
         desc = (c.get("suggested_description") or c.get("description") or c.get("summary") or "").strip()
         if not desc:

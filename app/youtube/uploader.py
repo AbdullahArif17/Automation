@@ -49,19 +49,31 @@ class YouTubeUploader:
         description: str,
         tags: list[str],
         privacy_status: str = "private",
-        category_id: str = "28",  # Science & Technology
+        category_id: str = "24",  # Entertainment (broadest & highest performing for clips/talk/podcasts)
         job_id: Optional[str] = None,
     ) -> UploadResult:
         creds = self._ensure_auth()
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"video not found: {video_path}")
 
+        # Enforce YouTube's 500-character total tag length limit
+        safe_tags: list[str] = []
+        tag_chars = 0
+        for t in tags:
+            clean_t = t.strip()
+            if not clean_t:
+                continue
+            if tag_chars + len(clean_t) + 1 > 490:
+                break
+            safe_tags.append(clean_t)
+            tag_chars += len(clean_t) + 1
+
         # 1. Initiate resumable session
         metadata = {
             "snippet": {
                 "title": title,
                 "description": description,
-                "tags": tags[:500],
+                "tags": safe_tags,
                 "categoryId": category_id,
                 "defaultLanguage": "en-US",
                 "defaultAudioLanguage": "en-US",

@@ -187,27 +187,41 @@ def build_caption_track_from_whisper(
         start_time = block_words[0][1]
         end_time = block_words[-1][2]
 
+        # Build word-level timing for karaoke highlight
+        words_timing = [
+            (w, round(ws, 3), round(we, 3))
+            for w, ws, we in block_words
+        ]
+
         caption_lines.append(CaptionLine(
             index=i + 1,
             start=round(start_time, 2),
             end=round(end_time, 2),
             text=block_text,
+            words=words_timing,
         ))
 
-    # Ensure last caption ends before CTA
+    # Append CTA without truncating dialogue
     if caption_lines:
-        caption_lines[-1].end = min(round(clip_duration, 2), round(clip_duration - 2.0, 2))
-
-    # Append CTA in the last 2 seconds
-    cta_start = max(0.0, round(clip_duration - 2.0, 2))
-    cta_end = round(clip_duration, 2)
-    caption_lines.append(CaptionLine(
-        index=len(caption_lines) + 1,
-        start=cta_start,
-        end=cta_end,
-        text="SUBSCRIBE FOR MORE!",
-        emphasis=True,
-    ))
+        last_speech_end = caption_lines[-1].end
+        cta_start = max(round(last_speech_end, 2), max(0.0, round(clip_duration - 1.5, 2)))
+        cta_end = round(clip_duration, 2)
+        if cta_end > cta_start:
+            caption_lines.append(CaptionLine(
+                index=len(caption_lines) + 1,
+                start=cta_start,
+                end=cta_end,
+                text="SUBSCRIBE FOR MORE!",
+                emphasis=True,
+            ))
+        elif clip_duration >= 2.0:
+            caption_lines.append(CaptionLine(
+                index=len(caption_lines) + 1,
+                start=round(clip_duration - 1.0, 2),
+                end=cta_end,
+                text="SUBSCRIBE FOR MORE!",
+                emphasis=True,
+            ))
 
     logger.info(f"built {len(caption_lines)} caption lines from whisper timestamps for clip [{clip_start:.1f}-{clip_end:.1f}]",
                 extra={"stage": "captions", "status": "built", "word_count": len(clip_words)})
@@ -219,7 +233,7 @@ def generate_clip_captions(
     transcript: TranscriptResult,
     clip: ClipCandidate,
     output_base: str,
-    max_chars_per_line: int = 42,
+    max_chars_per_line: int = 20,
     max_lines_per_caption: int = 2,
     formats: list[str] = ("srt", "ass"),
     provider: Optional[Any] = None,
