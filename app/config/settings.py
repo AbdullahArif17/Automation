@@ -109,7 +109,7 @@ class Settings:
     # Clipper (video-to-shorts)
     whisper_model_size: str = field(default_factory=lambda: os.getenv("WHISPER_MODEL_SIZE", "base.en"))
     clip_crop_mode: str = field(default_factory=lambda: os.getenv("CLIP_CROP_MODE", "center"))
-    clip_burn_subtitles: str = field(default_factory=lambda: os.getenv("CLIP_BURN_SUBTITLES", "auto"))
+    clip_burn_subtitles: str = field(default_factory=lambda: os.getenv("CLIP_BURN_SUBTITLES", "always"))
     clip_min_score: float = field(default_factory=lambda: _env_float("CLIP_MIN_SCORE", 0.5))
     clip_input_dir: Path = field(default_factory=lambda: BASE_DIR / "input")
     clip_output_dir: Path = field(default_factory=lambda: BASE_DIR / "output")

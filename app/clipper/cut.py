@@ -325,7 +325,7 @@ def cut_segment(
     crop_filter = build_crop_filter(crop_mode, src_w, src_h, target_w, target_h, framing_plan=framing_plan)
 
     if ass_path:
-        burn_mode = (os.getenv("CLIP_BURN_SUBTITLES") or getattr(settings, "clip_burn_subtitles", "auto")).lower()
+        burn_mode = (os.getenv("CLIP_BURN_SUBTITLES") or getattr(settings, "clip_burn_subtitles", "always")).lower()
         should_burn = True
 
         if burn_mode == "never":
