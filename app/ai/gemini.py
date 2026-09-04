@@ -44,8 +44,9 @@ class GeminiProvider(LLMProvider):
             raise RuntimeError("GEMINI_API_KEY is not set; cannot use Gemini provider")
         self._in_ci = os.getenv("CI") == "true" or os.getenv("GITHUB_ACTIONS") == "true"
 
-    def _post(self, prompt: str, temperature: float) -> str:
-        url = f"{BASE_URL}/{self.model}:generateContent?key={self.api_key}"
+    def _post(self, prompt: str, temperature: float, model: str | None = None) -> str:
+        active_model = model or self.model
+        url = f"{BASE_URL}/{active_model}:generateContent?key={self.api_key}"
         body = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": temperature},
@@ -59,13 +60,12 @@ class GeminiProvider(LLMProvider):
                 payload = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "ignore")[:300]
-            # Check for quota exceeded (429)
             if exc.code == 429:
-                logger.warning(f"Gemini quota exceeded (429), will retry",
-                             extra={"stage": "gemini", "status": "retry", "error": detail})
+                logger.warning(f"Gemini {active_model} quota exceeded (429), will retry",
+                             extra={"stage": "gemini", "status": "retry", "model": active_model, "error": detail})
             else:
-                logger.error(f"Gemini HTTP {exc.code}: {detail}",
-                             extra={"stage": "gemini", "status": "error", "error": detail})
+                logger.error(f"Gemini {active_model} HTTP {exc.code}: {detail}",
+                             extra={"stage": "gemini", "status": "error", "model": active_model, "error": detail})
             raise
         candidates = payload.get("candidates") or []
         if not candidates:
@@ -79,9 +79,47 @@ class GeminiProvider(LLMProvider):
         # Retry with exponential backoff. In CI, use much longer base delay.
         if self._in_ci:
             return self._generate_with_ci_backoff(prompt, temperature)
-        # Normal: retry only transient errors (429, 5xx)
-        return retry(self._post, prompt, temperature, max_attempts=3,
-                     retry_on=(urllib.error.URLError, TimeoutError, urllib.error.HTTPError))
+
+        candidate_models = [self.model]
+        for m in ("gemini-flash-latest", "gemini-3.1-flash-lite"):
+            if m not in candidate_models:
+                candidate_models.append(m)
+
+        delays = [2.0, 5.0, 10.0]
+        last_exc: Exception | None = None
+
+        for model_idx, model_name in enumerate(candidate_models):
+            for attempt, delay in enumerate(delays, 1):
+                try:
+                    return self._post(prompt, temperature, model=model_name)
+                except urllib.error.HTTPError as exc:
+                    last_exc = exc
+                    if exc.code in (429, 500, 502, 503, 504):
+                        logger.warning(
+                            f"Gemini {model_name} HTTP {exc.code} (attempt {attempt}/{len(delays)}), retrying in {delay}s",
+                            extra={"stage": "gemini", "status": "retry", "model": model_name, "code": exc.code}
+                        )
+                        time.sleep(delay)
+                    else:
+                        raise
+                except (urllib.error.URLError, TimeoutError) as exc:
+                    last_exc = exc
+                    logger.warning(
+                        f"Gemini network error on {model_name} (attempt {attempt}/{len(delays)}), retrying in {delay}s: {exc}",
+                        extra={"stage": "gemini", "status": "retry", "model": model_name}
+                    )
+                    time.sleep(delay)
+
+            if model_idx < len(candidate_models) - 1:
+                next_model = candidate_models[model_idx + 1]
+                logger.warning(
+                    f"Gemini model {model_name} unavailable after retries; falling over to {next_model}",
+                    extra={"stage": "gemini", "status": "failover", "from": model_name, "to": next_model}
+                )
+
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("Gemini generate failed on all candidate models")
 
     def _generate_with_ci_backoff(self, prompt: str, temperature: float) -> str:
         """Generate with CI-friendly exponential backoff (longer delays)."""

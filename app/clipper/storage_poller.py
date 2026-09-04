@@ -367,9 +367,9 @@ def list_new_videos_youtube(
         title = v["snippet"].get("title", "Untitled")
         title_lower = title.lower()
 
-        # Skip pre-existing Shorts / clips: must be at least 120s long and not tagged as a Short
-        if duration_secs < 120 or "#shorts" in title_lower or "#short" in title_lower or "#tiktok" in title_lower:
-            logger.info(f"Skipping pre-existing Short/clip ({duration_secs}s): {title}")
+        # Skip pre-existing Shorts (<120s) and skip overly long multi-hour videos (>1500s / 25 min)
+        if duration_secs < 120 or duration_secs > 1500 or "#shorts" in title_lower or "#short" in title_lower or "#tiktok" in title_lower:
+            logger.info(f"Skipping video outside 2m-25m range ({duration_secs}s): {title}")
             continue
         new_videos.append(SourceVideo(
             source_type="youtube",
