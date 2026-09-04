@@ -165,9 +165,11 @@ def detect_hardcoded_subtitles(
     """Detect if a video has real dynamic burned-in subtitles.
 
     Distinguishes actual changing subtitle text from static objects
-    (laptops, desks, logos, podiums) using temporal variance:
-    - Subtitles appear, change words, and disappear as speech progresses.
+    (laptops, desks, logos, podiums) and camera motion using temporal
+    variance with background stability compensation:
+    - Subtitles appear, change words, and disappear as speech progresses against a stable background.
     - Laptops, desks, and logos remain in the exact same position with static pixels.
+    - Rapid camera panning/action is filtered out via upper-background difference checking.
     """
     try:
         import cv2
@@ -185,7 +187,10 @@ def detect_hardcoded_subtitles(
         y1, y2 = int(h * 0.55), int(h * 0.92)
         x1, x2 = int(w * 0.10), int(w * 0.90)
 
-        masks = []
+        # Background stability reference zone: upper third (5% to 45% vertical)
+        bg_y1, bg_y2 = int(h * 0.05), int(h * 0.45)
+
+        samples = []
         sample_interval = max(0.8, duration / 10.0)
         t = start_time + 0.5
         end_t = start_time + duration - 0.5
@@ -199,41 +204,56 @@ def detect_hardcoded_subtitles(
                 t += sample_interval
                 continue
 
-            roi = frame[y1:y2, x1:x2]
-            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            bg_roi = gray[bg_y1:bg_y2, x1:x2]
+            sub_roi = gray[y1:y2, x1:x2]
 
-            # Subtitles have high brightness (white > 200 or yellow) + high gradient (dark outlines)
-            _, bright = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
-            grad = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8))
-            _, edges = cv2.threshold(grad, 35, 255, cv2.THRESH_BINARY)
+            # Subtitles have high brightness (white > 195 or yellow) + high gradient (dark outlines)
+            _, bright = cv2.threshold(sub_roi, 195, 255, cv2.THRESH_BINARY)
+            grad = cv2.morphologyEx(sub_roi, cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8))
+            _, edges = cv2.threshold(grad, 30, 255, cv2.THRESH_BINARY)
 
-            text_candidate = cv2.bitwise_and(bright, edges)
+            raw_text = cv2.bitwise_and(bright, edges)
 
-            # Filter small noise: must have at least 50 active pixels
-            if np.sum(text_candidate > 0) >= 50:
-                masks.append((t, text_candidate))
-            else:
-                masks.append((t, None))
+            # Filter small noise: must have at least 80 active text pixels
+            active_pixels = int(np.sum(raw_text > 0))
+            text_mask = raw_text if active_pixels >= 80 else None
+
+            samples.append({
+                "t": t,
+                "bg": bg_roi,
+                "mask": text_mask,
+                "active_pixels": active_pixels,
+            })
 
             samples_taken += 1
             t += sample_interval
 
         cap.release()
 
-        if len(masks) < 2:
+        if len(samples) < 2:
             return False
 
         dynamic_changes = 0
         static_matches = 0
 
-        for i in range(len(masks) - 1):
-            t_a, m_a = masks[i]
-            t_b, m_b = masks[i + 1]
+        for i in range(len(samples) - 1):
+            s_a = samples[i]
+            s_b = samples[i + 1]
+
+            # Check background stability in upper half of frame
+            bg_diff = float(np.mean(cv2.absdiff(s_a["bg"], s_b["bg"])))
+            if bg_diff > 18.0:
+                # Camera is panning, cutting, or moving rapidly - not a stable subtitle interval
+                continue
+
+            m_a = s_a["mask"]
+            m_b = s_b["mask"]
 
             if m_a is None and m_b is None:
                 continue
             if (m_a is None) != (m_b is None):
-                # Text appeared or disappeared! Subtitle behavior.
+                # Text appeared or disappeared during stable background
                 dynamic_changes += 1
                 continue
 
@@ -325,7 +345,7 @@ def cut_segment(
     crop_filter = build_crop_filter(crop_mode, src_w, src_h, target_w, target_h, framing_plan=framing_plan)
 
     if ass_path:
-        burn_mode = (os.getenv("CLIP_BURN_SUBTITLES") or getattr(settings, "clip_burn_subtitles", "always")).lower()
+        burn_mode = (os.getenv("CLIP_BURN_SUBTITLES") or getattr(settings, "clip_burn_subtitles", "auto")).lower()
         should_burn = True
 
         if burn_mode == "never":
