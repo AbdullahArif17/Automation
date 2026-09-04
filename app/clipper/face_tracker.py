@@ -94,24 +94,7 @@ class FramingPlan:
     bottom_h: int = 0
 
 
-def _check_frame_has_subtitles(frame: np.ndarray) -> bool:
-    """Detect if high-contrast horizontal subtitle text exists in the lower third."""
-    try:
-        h, w = frame.shape[:2]
-        roi = frame[int(h * 0.55):int(h * 0.95), int(w * 0.08):int(w * 0.92)]
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        grad = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8))
-        _, thresh = cv2.threshold(grad, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 3))
-        connected = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-        contours, _ = cv2.findContours(connected, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        for cnt in contours:
-            _, _, cw, ch = cv2.boundingRect(cnt)
-            if cw >= (w * 0.12) and 12 <= ch <= 90 and (cw / max(1, ch)) >= 2.5:
-                return True
-        return False
-    except Exception:
-        return False
+
 
 
 class FaceDetector:
@@ -233,7 +216,6 @@ def analyze_clip_framing(
     last_cut = start_seconds
 
     total_sampled = 0
-    subtitle_hits = 0
     current_time = start_seconds
     end_time = start_seconds + duration
     consecutive_fails = 0
@@ -262,10 +244,6 @@ def analyze_clip_framing(
         detect_h = int(src_h * scale)
         small_frame = cv2.resize(frame, (640, detect_h))
 
-        # Check if this frame contains existing burned-in subtitles
-        if _check_frame_has_subtitles(small_frame):
-            subtitle_hits += 1
-
         detected = detector.detect(small_frame)
         frame_centers = []
         for face in detected:
@@ -291,16 +269,10 @@ def analyze_clip_framing(
 
     cap.release()
 
-    has_existing_subs = (subtitle_hits >= max(2, int(total_sampled * 0.25))) if total_sampled > 0 else False
-    if has_existing_subs:
-        logger.info(f"Pre-existing hardcoded subtitles detected in source ({subtitle_hits}/{total_sampled} frames)")
-
     all_face_centers = [s.faces for s in samples if s.faces]
     if not all_face_centers:
         logger.info("No faces detected in clip; falling back to center crop")
-        plan = _make_center_plan(src_w, src_h, target_w, target_h)
-        plan.has_subtitles = has_existing_subs
-        return plan
+        return _make_center_plan(src_w, src_h, target_w, target_h)
 
     # 1. Check for consistent 2-person podcast wide format across the clip
     two_face_frames = [f for f in all_face_centers if len(f) >= 2 and (f[-1] - f[0]) > (src_w * 0.25)]
@@ -310,9 +282,7 @@ def analyze_clip_framing(
         median_left = int(np.median(left_speakers))
         median_right = int(np.median(right_speakers))
         logger.info(f"Detected 2 distinct speakers (left={median_left}, right={median_right}); generating podcast split-screen")
-        plan = _make_split_screen_plan(src_w, src_h, median_left, median_right, target_w, target_h)
-        plan.has_subtitles = has_existing_subs
-        return plan
+        return _make_split_screen_plan(src_w, src_h, median_left, median_right, target_w, target_h)
 
     # 2. Dynamic Scene-Aware Framing: analyze camera shots
     cut_timestamps.append(end_time)
@@ -364,7 +334,6 @@ def analyze_clip_framing(
         )
         plan = FramingPlan(
             mode="dynamic",
-            has_subtitles=has_existing_subs,
             crop_x=shot_plans[0].crop_x,
             crop_y=crop_y,
             crop_w=crop_w,
@@ -377,9 +346,7 @@ def analyze_clip_framing(
     primary_centers = [f[0] if len(f) == 1 else f[int(np.argmin(np.abs(np.array(f) - src_w // 2)))] for f in all_face_centers]
     median_x = int(np.median(primary_centers))
     logger.info(f"Detected single primary speaker at x={median_x}; generating centered smart track")
-    plan = _make_single_plan(src_w, src_h, median_x, target_w, target_h)
-    plan.has_subtitles = has_existing_subs
-    return plan
+    return _make_single_plan(src_w, src_h, median_x, target_w, target_h)
 
 
 def _make_center_plan(src_w: int, src_h: int, target_w: int, target_h: int) -> FramingPlan:

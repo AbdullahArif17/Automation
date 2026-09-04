@@ -222,11 +222,8 @@ def cut_segment(
     crop_filter = build_crop_filter(crop_mode, src_w, src_h, target_w, target_h, framing_plan=framing_plan)
 
     if ass_path:
-        if framing_plan and getattr(framing_plan, "has_subtitles", False):
-            logger.info(f"Skipping subtitle burn for job {job_id}: source video already has pre-existing subtitles!")
-        else:
-            safe_ass = str(Path(ass_path).absolute()).replace("\\", "/").replace(":", "\\:")
-            crop_filter += f",subtitles='{safe_ass}'"
+        safe_ass = str(Path(ass_path).absolute()).replace("\\", "/").replace(":", "\\:")
+        crop_filter += f",subtitles='{safe_ass}'"
 
     # ffmpeg command with studio-grade settings:
     # -ss before -i: fast seek to nearest keyframe before start
