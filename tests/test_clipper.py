@@ -8,7 +8,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.clipper.captions import build_caption_track_from_whisper
+from app.clipper.captions import (
+    build_caption_track_from_whisper,
+    correct_words_with_llm,
+    generate_clip_captions,
+)
 from app.clipper.cut import build_crop_filter
 from app.clipper.highlight import ClipCandidate, parse_highlight_response
 from app.clipper.storage_poller import validate_cookies_file
@@ -449,6 +453,113 @@ def test_build_crop_filter_dynamic_mode():
     filter_str = build_crop_filter("auto", 1280, 720, 1080, 1920, framing_plan=plan)
     assert "if(lt(t,12.00),150,650)" in filter_str
     assert "scale=1080:1920" in filter_str
+
+
+def test_correct_words_with_llm_success():
+    """Test smart subtitle phonetic & entity correction with LLM."""
+    from app.ai.provider import MockProvider
+
+    words = [
+        ("Watch", 0.0, 0.4),
+        ("Rhianna", 0.4, 0.9),
+        ("wit", 0.9, 1.2),
+        ("her", 1.2, 1.5),
+        ("fans", 1.5, 2.0),
+    ]
+    # LLM fixes "Rhianna" -> "Rihanna" and "wit" -> "with"
+    mock_resp = json.dumps({
+        "0": "Watch",
+        "1": "Rihanna",
+        "2": "with",
+        "3": "her",
+        "4": "fans",
+    })
+    provider = MockProvider([mock_resp])
+
+    corrected = correct_words_with_llm(words, provider=provider, context="Rihanna concert")
+    assert len(corrected) == 5
+    assert corrected[0] == ("Watch", 0.0, 0.4)
+    assert corrected[1] == ("Rihanna", 0.4, 0.9)
+    assert corrected[2] == ("with", 0.9, 1.2)
+    assert corrected[3] == ("her", 1.2, 1.5)
+    assert corrected[4] == ("fans", 1.5, 2.0)
+
+
+def test_correct_words_with_llm_markdown_fence():
+    """Test handling of markdown code fences from LLM."""
+    from app.ai.provider import MockProvider
+
+    words = [("could", 0.0, 0.5), ("of", 0.5, 1.0)]
+    mock_resp = "```json\n{\"0\": \"could\", \"1\": \"have\"}\n```"
+    provider = MockProvider([mock_resp])
+
+    corrected = correct_words_with_llm(words, provider=provider)
+    assert corrected[0] == ("could", 0.0, 0.5)
+    assert corrected[1] == ("have", 0.5, 1.0)
+
+
+def test_correct_words_with_llm_fallback_on_error():
+    """Test safe fallback to raw words if LLM raises exception or invalid JSON."""
+    class FailingProvider:
+        def generate(self, prompt, temperature=0.7):
+            raise RuntimeError("API timeout or 503 error")
+
+    words = [("hello", 0.0, 0.5), ("world", 0.5, 1.0)]
+    corrected = correct_words_with_llm(words, provider=FailingProvider())
+    # Should safely return untouched original words without crashing
+    assert corrected == words
+
+
+def test_correct_words_with_llm_fallback_on_bad_json():
+    """Test safe fallback if LLM response is not valid JSON."""
+    from app.ai.provider import MockProvider
+
+    words = [("test", 0.0, 0.5)]
+    provider = MockProvider(["Sorry, I cannot process this."])
+    corrected = correct_words_with_llm(words, provider=provider)
+    assert corrected == words
+
+
+def test_correct_words_with_llm_empty():
+    """Test that empty or very short word list is returned immediately."""
+    from app.ai.provider import MockProvider
+
+    provider = MockProvider()
+    assert correct_words_with_llm([], provider=provider) == []
+    assert len(provider.calls) == 0
+
+
+def test_build_caption_track_from_whisper_with_smart_subtitles():
+    """Test that build_caption_track_from_whisper applies smart subtitle polishing."""
+    from app.ai.provider import MockProvider
+
+    transcript = _make_transcript([
+        ("Watch", 1.0, 1.5),
+        ("Rhianna", 1.5, 2.2),
+        ("wit", 2.2, 2.7),
+        ("fans", 2.7, 3.2),
+    ], duration=10.0)
+    clip = ClipCandidate(
+        start_seconds=1.0,
+        end_seconds=4.0,
+        reason="Good moment",
+        suggested_title="Rihanna moment",
+        suggested_description="Rihanna interacts with fans",
+        confidence=0.9,
+    )
+    mock_resp = json.dumps({
+        "0": "Watch",
+        "1": "Rihanna",
+        "2": "with",
+        "3": "fans",
+    })
+    provider = MockProvider([mock_resp])
+
+    track = build_caption_track_from_whisper(transcript, clip, provider=provider)
+    all_text = " ".join(line.text for line in track.lines)
+    assert "Rihanna with fans" in all_text
+    # Check CTA is present
+    assert any("SUBSCRIBE FOR MORE!" in line.text for line in track.lines)
 
 
 if __name__ == "__main__":
