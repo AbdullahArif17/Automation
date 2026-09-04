@@ -135,24 +135,24 @@ class Pipeline:
                 )
             self.db.set_job_state(job_id, JobState.SCRIPT_APPROVED, stage="script")
 
-            # 3. Visual plan
-            planner = VisualPlanner(self.provider)
-            plan = planner.plan(script.text, scored.topic, script.duration_estimate, job_id=jid)
-
-            # 4. Assets per scene
-            self.db.set_job_state(job_id, JobState.ASSET_COLLECTION, stage="asset")
-            scene_assets = self._collect_assets(plan, jid)
-
-            # 5. Voice
+            # 3. Voice (synthesize first to know exact audio duration)
             self.db.set_job_state(job_id, JobState.VOICE_GENERATION, stage="voice")
             voice_path = str(self.output_dir / f"voice_{job_id}.wav")
             voice = self.voice.synthesize(script.text, voice_path, job_id=jid)
 
-            # 6. Captions - use word boundaries if available (e.g., from edge-tts)
+            # 4. Captions - use word boundaries if available (e.g., from edge-tts)
             word_boundaries = self.voice.get_word_boundaries(script.text)
             captions: CaptionTrack = split_into_caption_lines(
                 script.text, voice.duration, word_boundaries=word_boundaries
             )
+
+            # 5. Visual plan (planned to cover exact voice duration)
+            planner = VisualPlanner(self.provider)
+            plan = planner.plan(script.text, scored.topic, voice.duration, job_id=jid)
+
+            # 6. Assets per scene
+            self.db.set_job_state(job_id, JobState.ASSET_COLLECTION, stage="asset")
+            scene_assets = self._collect_assets(plan, jid)
 
             # 7. Render
             self.db.set_job_state(job_id, JobState.RENDERING, stage="render")

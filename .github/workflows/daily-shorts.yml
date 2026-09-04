@@ -35,11 +35,11 @@ jobs:
       AUTO_UPLOAD: "true"
       AUTO_PUBLISH: "true"
       MAX_DAILY_GENERATIONS: 2
-      MAX_REGENERATION_ATTEMPTS: 1
       MIN_SCRIPT_QUALITY: 6.5
       TTS_PROVIDER: edge-tts
       MEDIA_PROVIDER: free
       DATABASE_URL: sqlite:///data/app.db
+      TOPIC_NICHE: "mind blowing space and science mysteries"
       # Optional free-tier media APIs for asset resilience (fallback chain)
       PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
       PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}

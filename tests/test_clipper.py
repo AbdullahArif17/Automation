@@ -327,8 +327,9 @@ def test_clip_duplicate_check_only_against_clipped():
 
             from app.clipper.pipeline import ClipperPipeline
             from app.config.settings import Settings
+            from app.ai.provider import MockProvider
             settings = Settings()
-            pipeline = ClipperPipeline(db=db, settings=settings)
+            pipeline = ClipperPipeline(db=db, settings=settings, provider=MockProvider())
 
             # This title is similar to the clipped video
             result = pipeline._check_clip_duplicate("My Clipped Short", "From my video", "job1")

@@ -54,7 +54,8 @@ class VisualPlanner:
         prompt = render("visual_plan", script=script, topic=topic)
         result = self.provider.generate_json(prompt, temperature=0.4)
 
-        duration = float(result.get("duration", duration_estimate))
+        # Anchor duration to true audio duration
+        duration = float(duration_estimate)
         scenes_data = result.get("scenes", [])
 
         scenes = []
@@ -67,17 +68,21 @@ class VisualPlanner:
                 motion=str(s.get("motion", "static")),
             ))
 
-        # Validate: scenes should cover duration, no gaps > 1s
+        # Validate: scenes must cover the full voice duration smoothly
         if scenes:
             scenes.sort(key=lambda s: s.start)
-            # Ensure first scene starts at 0
-            if scenes[0].start > 0.5:
-                scenes[0].start = 0
-            # Ensure last scene ends at duration
-            if abs(scenes[-1].end - duration) > 1.0:
+            scenes[0].start = 0.0
+            raw_end = scenes[-1].end
+            # Proportionally scale scene timestamps to match the exact voice duration
+            if raw_end > 0 and abs(raw_end - duration) > 0.5:
+                ratio = duration / raw_end
+                for s in scenes:
+                    s.start = round(s.start * ratio, 2)
+                    s.end = round(s.end * ratio, 2)
+                scenes[0].start = 0.0
                 scenes[-1].end = duration
 
         plan = VisualPlan(duration=duration, scenes=scenes)
-        logger.info(f"visual plan: {len(scenes)} scenes, {duration:.1f}s",
+        logger.info(f"visual plan: {len(scenes)} scenes covering {duration:.1f}s",
                     extra={"job_id": job_id, "stage": "visual_plan", "status": "done"})
         return plan
