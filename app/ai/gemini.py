@@ -81,7 +81,8 @@ class GeminiProvider(LLMProvider):
             return self._generate_with_ci_backoff(prompt, temperature)
 
         candidate_models = [self.model]
-        for m in ("gemini-flash-latest", "gemini-3.1-flash-lite"):
+        # Prioritize 500 RPD / 15 RPM Free Tier models first
+        for m in ("gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.8-flash"):
             if m not in candidate_models:
                 candidate_models.append(m)
 
