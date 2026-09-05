@@ -594,7 +594,7 @@ def poll_and_clip(
     """
     settings = pipeline.settings
     if source_mode is None:
-        source_mode = settings.clip_source_mode
+        source_mode = getattr(settings, "clip_source_mode", None) or os.getenv("CLIP_SOURCE_MODE", None)
 
     if not source_mode:
         if os.getenv("CLIP_SOURCE_S3_BUCKET"):

@@ -68,14 +68,22 @@ class AnalyticsCollector:
         )
 
         def _get():
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                return json.loads(resp.read().decode("utf-8"))
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", "ignore")[:300]
+                if exc.code == 403:
+                    # Non-retryable permission error
+                    raise PermissionError(f"HTTP 403: {detail}")
+                raise RuntimeError(f"analytics fetch failed: {detail}")
 
         try:
             data = retry(_get, max_attempts=3, retry_on=(urllib.error.URLError, TimeoutError))
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", "ignore")[:300]
-            raise RuntimeError(f"analytics fetch failed: {detail}")
+        except PermissionError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(f"analytics fetch failed: {exc}")
 
         items = data.get("items", [])
         if not items:
@@ -124,6 +132,10 @@ class AnalyticsCollector:
             try:
                 m = self.collect_video(r["youtube_video_id"], job_id=r["id"])
                 results.append(m)
+            except PermissionError as exc:
+                logger.info("YouTube token lacks analytics/read scope; skipping pre-poll analytics sync",
+                            extra={"stage": "analytics", "status": "skipped_scope"})
+                break
             except Exception as exc:
                 logger.warning(f"collect failed for {r['youtube_video_id']}: {exc}",
                                extra={"job_id": str(r["id"]), "stage": "analytics", "status": "error"})
