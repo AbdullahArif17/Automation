@@ -347,7 +347,11 @@ def cut_segment(
     # Dynamic camera punch-in zoom (0-2.2s) to break mobile thumb-swipe inertia
     intro_punchin = os.getenv("CLIP_INTRO_PUNCHIN", "true").lower() in ("true", "1", "yes")
     if intro_punchin and duration >= 3.0:
-        crop_filter += f",zoompan=z='if(lte(it,2.2),1.07-0.07*(it/2.2),1.0)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:fps={target_fps}:s={target_w}x{target_h}"
+        crop_filter += (
+            f",crop=w='if(lte(t\\,2.2)\\,{target_w}/(1.07-0.07*(t/2.2))\\,{target_w})':"
+            f"h='if(lte(t\\,2.2)\\,{target_h}/(1.07-0.07*(t/2.2))\\,{target_h})':"
+            f"x='(in_w-out_w)/2':y='(in_h-out_h)/2',scale={target_w}:{target_h}"
+        )
 
     if ass_path:
         burn_mode = (os.getenv("CLIP_BURN_SUBTITLES") or getattr(settings, "clip_burn_subtitles", "auto")).lower()

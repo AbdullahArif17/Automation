@@ -708,8 +708,8 @@ def test_cut_segment_intro_punchin_included():
             cut_segment("dummy.mp4", cand, "out.mp4")
             args = mock_run.call_args[0][0]
             f = args[args.index("-filter_complex") + 1]
-            assert "zoompan=" in f
-            assert "1.07-0.07" in f
+            assert "crop=" in f
+            assert "1.07-0.07*(t" in f
 
 
 if __name__ == "__main__":
