@@ -652,5 +652,65 @@ def test_cut_segment_subtitle_burn_modes():
             assert "subtitles=" in f
 
 
+def test_top_hook_overlay_banner_in_ass():
+    """Verify ASS output includes TopHook style and headline dialogue line."""
+    from app.media.captions import CaptionTrack, CaptionLine, to_ass
+
+    track = CaptionTrack(lines=[
+        CaptionLine(1, 0.0, 5.0, "Hello world", words=[("Hello", 0.0, 2.0), ("world", 2.0, 4.0)])
+    ])
+    ass_text = to_ass(track, hook_headline="WAIT FOR THE END 😳", clip_duration=35.5)
+    assert "Style: TopHook" in ass_text
+    assert "TopHook,,0,0,0,,{\\b1}WAIT FOR THE END 😳{\\b0}" in ass_text
+    assert "0:00:35.50" in ass_text
+
+
+def test_adaptive_query_selection():
+    """Verify select_adaptive_query picks queries and exploits high-performing ones."""
+    from unittest.mock import MagicMock
+    from app.clipper.storage_poller import select_adaptive_query
+
+    mock_db = MagicMock()
+    mock_db.get_topic_analytics_summary.return_value = {
+        "clip:viral topic": {"count": 3, "avg_views": 100000.0, "avg_likes": 5000.0, "avg_comments": 200.0},
+        "clip:dead topic": {"count": 3, "avg_views": 10.0, "avg_likes": 0.0, "avg_comments": 0.0},
+    }
+
+    # Exploitation (epsilon=0): should overwhelmingly favor viral topic
+    chosen = select_adaptive_query(mock_db, ["viral topic", "dead topic"], epsilon=0.0)
+    assert chosen == "viral topic"
+
+    # Single query returns itself
+    assert select_adaptive_query(mock_db, ["only one"]) == "only one"
+
+
+def test_cut_segment_intro_punchin_included():
+    """Verify zoompan intro punch-in is appended to crop filter chain."""
+    from unittest.mock import patch, MagicMock
+    from app.clipper.cut import cut_segment
+    from app.clipper.highlight import ClipCandidate
+
+    cand = ClipCandidate(
+        start_seconds=10.0,
+        end_seconds=30.0,
+        reason="test",
+        suggested_title="t",
+        suggested_description="d",
+        confidence=0.9,
+    )
+
+    with patch("app.clipper.cut.check_ffmpeg", return_value=True), \
+         patch("app.clipper.cut.get_video_info", return_value=(1920, 1080, 60.0, 30.0)), \
+         patch("app.clipper.cut.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch.dict("os.environ", {"CLIP_INTRO_PUNCHIN": "true", "CLIP_BURN_SUBTITLES": "never"}):
+            cut_segment("dummy.mp4", cand, "out.mp4")
+            args = mock_run.call_args[0][0]
+            f = args[args.index("-filter_complex") + 1]
+            assert "zoompan=" in f
+            assert "1.07-0.07" in f
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

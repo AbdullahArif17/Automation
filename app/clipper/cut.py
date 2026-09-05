@@ -344,6 +344,11 @@ def cut_segment(
     # Build filter chain
     crop_filter = build_crop_filter(crop_mode, src_w, src_h, target_w, target_h, framing_plan=framing_plan)
 
+    # Dynamic camera punch-in zoom (0-2.2s) to break mobile thumb-swipe inertia
+    intro_punchin = os.getenv("CLIP_INTRO_PUNCHIN", "true").lower() in ("true", "1", "yes")
+    if intro_punchin and duration >= 3.0:
+        crop_filter += f",zoompan=z='if(lte(it,2.2),1.07-0.07*(it/2.2),1.0)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:fps={target_fps}:s={target_w}x{target_h}"
+
     if ass_path:
         burn_mode = (os.getenv("CLIP_BURN_SUBTITLES") or getattr(settings, "clip_burn_subtitles", "auto")).lower()
         should_burn = True

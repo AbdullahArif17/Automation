@@ -55,6 +55,19 @@ def main() -> int:
 
     db = Database(settings.db_path)
     try:
+        # Pre-poll analytics sync: refresh view/like/comment counts to feed adaptive query selection
+        from app.youtube.auth import YouTubeAuth
+        auth = YouTubeAuth()
+        if auth.is_configured():
+            try:
+                from app.youtube.analytics import AnalyticsCollector
+                collector = AnalyticsCollector(auth=auth, db=db)
+                synced = collector.collect_all_published()
+                logger.info(f"synced analytics for {len(synced)} published videos prior to polling",
+                            extra={"stage": "analytics", "status": "synced"})
+            except Exception as e:
+                logger.warning(f"pre-poll analytics sync skipped: {e}")
+
         pipeline = ClipperPipeline(db=db, settings=settings)
         # poll_and_clip auto-detects mode from CLIP_SOURCE_MODE or secrets
         results = poll_and_clip(

@@ -299,3 +299,26 @@ class Database:
         if isinstance(v, (dict, list)):
             return json.dumps(v)
         return v
+
+    def get_topic_analytics_summary(self) -> dict[str, dict[str, float]]:
+        """Return avg views, avg likes, avg comments and count per topic category."""
+        rows = self.fetchall("""
+            SELECT 
+                topic,
+                COUNT(*) as count,
+                AVG(views) as avg_views,
+                AVG(likes) as avg_likes,
+                AVG(comments) as avg_comments
+            FROM videos 
+            WHERE youtube_video_id IS NOT NULL AND topic IS NOT NULL
+            GROUP BY topic
+        """)
+        summary = {}
+        for r in rows:
+            summary[r["topic"]] = {
+                "count": r["count"],
+                "avg_views": r["avg_views"] or 0.0,
+                "avg_likes": r["avg_likes"] or 0.0,
+                "avg_comments": r["avg_comments"] or 0.0,
+            }
+        return summary

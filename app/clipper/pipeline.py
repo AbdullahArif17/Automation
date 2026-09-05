@@ -80,6 +80,7 @@ class ClipperPipeline:
         max_clips: int = 1,
         force_retranscribe: bool = False,
         job_id: Optional[str] = None,
+        topic_category: Optional[str] = None,
     ) -> PipelineResult:
         """Run the full clipper pipeline on a source video.
 
@@ -89,6 +90,7 @@ class ClipperPipeline:
             max_clips: Maximum number of clips to produce (1-3).
             force_retranscribe: Ignore cached transcript.
             job_id: Optional job ID string for logging.
+            topic_category: Optional search topic / category string for analytics attribution.
 
         Returns:
             PipelineResult with all outcomes.
@@ -97,9 +99,10 @@ class ClipperPipeline:
         if not source.exists():
             raise FileNotFoundError(f"source video not found: {source_path}")
 
-        # Create DB records
+        # Create DB records with topic attribution
+        resolved_topic = f"clip:{topic_category}" if topic_category else f"clip:{source.stem}"
         video_id = self.db.insert("videos", {
-            "topic": f"clip:{source.stem}",
+            "topic": resolved_topic,
             "title": "",
             "description": "",
             "video_path": "",
@@ -107,7 +110,7 @@ class ClipperPipeline:
             "source_type": "clipped",
             "created_at": _now(),
         })
-        job_db_id = self.db.create_job(f"clip:{source.stem}", payload={"video_id": video_id, "source_path": source_path})
+        job_db_id = self.db.create_job(resolved_topic, payload={"video_id": video_id, "source_path": source_path})
         self.db.execute("UPDATE publishing_jobs SET video_id=? WHERE id=?", (video_id, job_db_id))
 
         jid = str(job_db_id) if job_id is None else job_id
@@ -213,7 +216,7 @@ class ClipperPipeline:
                         )
                     else:
                         clip_vid = self.db.insert("videos", {
-                            "topic": f"clip:{source.stem}:{idx+1}",
+                            "topic": f"{resolved_topic}:{idx+1}",
                             "title": candidate.suggested_title,
                             "description": candidate.suggested_description,
                             "video_path": cut_result.output_path,

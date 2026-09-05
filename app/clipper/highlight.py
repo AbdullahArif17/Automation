@@ -28,6 +28,7 @@ class ClipCandidate:
     suggested_description: str
     confidence: float  # 0-1, model's confidence this will work as a Short
     crop_mode: str = "center"  # 'center' or 'blur'
+    hook_headline: str = ""  # 3-5 word curiosity hook banner in ALL CAPS + emoji
 
     @property
     def duration(self) -> float:
@@ -43,6 +44,7 @@ class ClipCandidate:
             "suggested_description": self.suggested_description,
             "confidence": self.confidence,
             "crop_mode": self.crop_mode,
+            "hook_headline": self.hook_headline,
         }
 
 
@@ -73,6 +75,7 @@ Return ONLY valid JSON matching this exact schema:
       "end_seconds": <float>,
       "reason": "<explain the context, who is speaking, what the core idea/punchline is, and why it works as a standalone Short>",
       "suggested_title": "<punchy curiosity hook naming person/topic, max 50 chars for mobile>",
+      "hook_headline": "<3-5 word curiosity hook in ALL CAPS with 1 emoji, e.g. 'HE REALLY SAID THIS... 😳' or 'WAIT FOR THE REACTION 💀'>",
       "suggested_description": "<2 context-rich sentences explaining who is talking and what happened + high-volume search keywords + 'Subscribe for more!' + 4 specific #hashtags + #shorts>",
       "confidence": <0.0-1.0>,
       "crop_mode": "<'center' or 'blur'>"
@@ -90,13 +93,15 @@ STRICT QUALITY RULES:
 3. MOBILE-OPTIMIZED TITLE:
    - Must explicitly name the person, topic, or conflict (e.g., 'Joe Rogan on the 1994 Own Goal' or 'Ronaldo Explains Why He Left').
    - Keep under 50 chars so the title is never cut off by '...' on mobile screens.
-4. STRICT DURATION BOUNDS (CRITICAL):
+4. TOP HOOK HEADLINE:
+   - Provide a punchy 3-5 word curiosity hook in ALL CAPS with 1 emoji to overlay at top of screen (e.g., 'HE COULDN'T BELIEVE THIS 😳' or 'THE SHOCKING TRUTH 🤫').
+5. STRICT DURATION BOUNDS (CRITICAL):
    - Duration MUST be between {min_dur:.0f} and {max_dur:.0f} seconds (optimal sweet spot is 28-45s for 80%+ completion rate).
    - Snippets under {min_dur:.0f}s or over {max_dur:.0f}s will be rejected.
-5. CROP MODE:
+6. CROP MODE:
    - Use 'center' for interviews, podcasts, gym, and centered subjects.
    - Use 'blur' for gaming or wide group panels where edges matter.
-6. Return 1-3 candidates, best first.
+7. Return 1-3 candidates, best first.
 """
 
 
@@ -176,6 +181,12 @@ def parse_highlight_response(response: str, min_dur: float, max_dur: float, vide
         if c_mode not in ("center", "blur"):
             c_mode = "center"
 
+        hook = (c.get("hook_headline") or c.get("hook") or c.get("banner") or "").strip()
+        if not hook:
+            words = [w for w in title.split() if not w.startswith("#")]
+            hook = " ".join(words[:4]).upper() + " 😳"
+        hook = hook[:50].strip()
+
         candidates.append(ClipCandidate(
             start_seconds=start,
             end_seconds=end,
@@ -184,6 +195,7 @@ def parse_highlight_response(response: str, min_dur: float, max_dur: float, vide
             suggested_description=desc[:5000],
             confidence=conf,
             crop_mode=c_mode,
+            hook_headline=hook,
         ))
 
     if not candidates:

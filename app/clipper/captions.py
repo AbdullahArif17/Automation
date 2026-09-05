@@ -237,6 +237,7 @@ def generate_clip_captions(
     max_lines_per_caption: int = 2,
     formats: list[str] = ("srt", "ass"),
     provider: Optional[Any] = None,
+    hook_headline: Optional[str] = None,
 ) -> ClipCaptionResult:
     """Generate caption files for a clip from whisper transcript with smart LLM polishing.
 
@@ -248,6 +249,7 @@ def generate_clip_captions(
         max_lines_per_caption: Max lines per caption block.
         formats: Which formats to write ("srt", "ass").
         provider: Optional LLMProvider for smart phonetic and entity correction.
+        hook_headline: Optional 3-5 word hook headline to overlay at top of screen.
 
     Returns:
         ClipCaptionResult with paths and track.
@@ -256,7 +258,14 @@ def generate_clip_captions(
         transcript, clip, max_chars_per_line, max_lines_per_caption, provider=provider
     )
 
-    paths = write_caption_files(track, output_base, formats=formats)
+    hook_text = hook_headline if hook_headline is not None else getattr(clip, "hook_headline", None)
+    paths = write_caption_files(
+        track,
+        output_base,
+        formats=formats,
+        hook_headline=hook_text,
+        clip_duration=clip.duration,
+    )
 
     return ClipCaptionResult(
         clip_candidate=clip,

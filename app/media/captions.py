@@ -245,6 +245,7 @@ PlayResY: 1920
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,Montserrat,84,&H0000FFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,10,0,2,120,120,480,1
 Style: Emphasis,Montserrat,90,&H0000FF00,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,10,0,2,120,120,480,1
+Style: TopHook,Montserrat,58,&H00FFFFFF,&H00FFFFFF,&H00000000,&HCC111111,-1,0,0,0,100,100,0,0,3,14,0,8,60,60,240,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -292,9 +293,28 @@ def _line_to_karaoke_ass(line: CaptionLine) -> str:
         return f"Dialogue: 0,{fmt_ass(line.start)},{fmt_ass(line.end)},{style},,0,0,0,,{text}"
 
 
-def to_ass(track: CaptionTrack) -> str:
-    """Convert to ASS format with karaoke highlighting for mobile readability."""
+def to_ass(
+    track: CaptionTrack,
+    hook_headline: Optional[str] = None,
+    clip_duration: Optional[float] = None,
+) -> str:
+    """Convert to ASS format with karaoke highlighting and optional top hook overlay banner."""
     parts = [ASS_HEADER]
+
+    # Render persistent Top Hook Banner if provided (Layer 1, stays at Y=240 safe zone)
+    if hook_headline and clip_duration and clip_duration > 0:
+        def fmt_ass(t: float) -> str:
+            h = int(t // 3600)
+            m = int((t % 3600) // 60)
+            s = int(t % 60)
+            cs = int((t - int(t)) * 100)
+            return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+        clean_hook = hook_headline.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}").replace("\n", " ").strip()
+        parts.append(
+            f"Dialogue: 1,0:00:00.00,{fmt_ass(clip_duration)},TopHook,,0,0,0,,{{\\b1}}{clean_hook}{{\\b0}}"
+        )
+
     for line in track.lines:
         parts.append(_line_to_karaoke_ass(line))
     return "\n".join(parts)
@@ -304,6 +324,8 @@ def write_caption_files(
     track: CaptionTrack,
     base_path: str,
     formats: list[str] = ("srt", "ass"),
+    hook_headline: Optional[str] = None,
+    clip_duration: Optional[float] = None,
 ) -> dict[str, str]:
     """Write caption files and return paths."""
     out = {}
@@ -317,7 +339,7 @@ def write_caption_files(
 
     if "ass" in formats:
         ass_path = base.with_suffix(".ass")
-        ass_path.write_text(to_ass(track), encoding="utf-8")
+        ass_path.write_text(to_ass(track, hook_headline=hook_headline, clip_duration=clip_duration), encoding="utf-8")
         out["ass"] = str(ass_path)
 
     logger.info(f"wrote captions: {list(out.keys())}",

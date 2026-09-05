@@ -531,17 +531,71 @@ def mark_video_processed(
     logger.info(f"marked video {video_id} as processed: etag={source.etag}, size={local_path.stat().st_size}")
 
 
+def select_adaptive_query(db: Database, queries: list[str], epsilon: float = 0.20) -> str:
+    """Select search query using epsilon-greedy + performance weighting.
+
+    - With probability epsilon (20%): Explore randomly or pick cold queries.
+    - With probability 1 - epsilon (80%): Exploit top performing query by average views & engagement.
+    """
+    import random
+    if not queries:
+        return ""
+    if len(queries) == 1:
+        return queries[0]
+
+    # Exploration branch (20% chance to test fresh/cold topics)
+    if random.random() < epsilon:
+        chosen = random.choice(queries)
+        logger.info(f"Adaptive Query (Exploration 20%): selected '{chosen}'")
+        return chosen
+
+    # Exploitation branch (80%): compute weights based on stored video performance
+    try:
+        topic_summary = db.get_topic_analytics_summary()
+    except Exception as exc:
+        logger.warning(f"Failed to fetch topic analytics, falling back to random: {exc}")
+        return random.choice(queries)
+
+    query_scores = {}
+    for q in queries:
+        topic_key = f"clip:{q}"
+        stats = topic_summary.get(topic_key)
+        if stats and stats["count"] > 0:
+            # Score formula: avg_views with engagement multiplier
+            engagement = (stats["avg_likes"] + stats["avg_comments"]) / (stats["avg_views"] + 1.0)
+            score = stats["avg_views"] * (1.0 + min(2.0, engagement * 10.0))
+            query_scores[q] = max(10.0, score)
+        else:
+            # Cold-start topic without data yet: assign optimistic default score
+            query_scores[q] = 50.0
+
+    total_score = sum(query_scores.values())
+    if total_score <= 0:
+        return random.choice(queries)
+
+    probs = [query_scores[q] / total_score for q in queries]
+    chosen = random.choices(queries, weights=probs, k=1)[0]
+    logger.info(f"Adaptive Query (Exploitation 80%): selected '{chosen}' (weight={query_scores[chosen]:.1f}/{total_score:.1f})")
+    return chosen
+
+
 def poll_and_clip(
     db: Database,
-    pipeline,
+    pipeline: ClipperPipeline,
+    source_mode: Optional[str] = None,
+    max_videos_per_run: int = 1,
     max_clips_per_video: int = 1,
-    upload: bool = True,
-    max_videos_per_run: int = 2,
+    upload: bool = False,
 ) -> list[tuple[SourceVideo, bool, Optional[str]]]:
-    """Main entry: auto-detects source mode, polls, clips, returns results."""
-    source_mode = os.getenv("CLIP_SOURCE_MODE", "").lower()
+    """Poll for new videos, download, cut highlights, and optionally upload.
 
-    # Auto-detect from secrets
+    Returns:
+        List of (source_video, success, error_message).
+    """
+    settings = pipeline.settings
+    if source_mode is None:
+        source_mode = settings.clip_source_mode
+
     if not source_mode:
         if os.getenv("CLIP_SOURCE_S3_BUCKET"):
             source_mode = "s3"
@@ -563,11 +617,9 @@ def poll_and_clip(
         if search_query:
             clean_sq = search_query.strip(' "\'')
             if "|" in clean_sq:
-                import random
                 queries = [q.strip(' "\'') for q in clean_sq.split("|") if q.strip(' "\'')]
                 if queries:
-                    search_query = random.choice(queries)
-                    logger.info(f"Multiple topics found in env. Randomly selected query: '{search_query}'")
+                    search_query = select_adaptive_query(db, queries)
             else:
                 search_query = clean_sq
 
@@ -597,11 +649,12 @@ def poll_and_clip(
                 upload=upload,
                 max_clips=max_clips_per_video,
                 force_retranscribe=False,
+                topic_category=search_query if source_mode == "youtube" else None,
             )
             any_uploaded = any(o.published for o in pipeline_result.outcomes) if upload else True
             video_row = db.fetchone(
-                "SELECT id FROM videos WHERE topic=? ORDER BY created_at DESC LIMIT 1",
-                (f"clip:{local_path.stem}",),
+                "SELECT id FROM videos WHERE video_path LIKE ? ORDER BY created_at DESC LIMIT 1",
+                (f"%{local_path.stem}%",),
             )
             if video_row:
                 mark_video_processed(db, src, local_path, video_row["id"])
