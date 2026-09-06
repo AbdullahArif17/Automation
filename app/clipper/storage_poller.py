@@ -644,10 +644,14 @@ def poll_and_clip(
         except ValueError:
             dedup_days = 30
 
+    # Fetch a candidate pool (at least 10 videos) so if some videos have no spoken dialogue,
+    # the poller automatically falls back to subsequent candidates until reaching max_videos_per_run.
+    candidate_pool_size = max(10, max_videos_per_run * 3)
+
     if source_mode == "s3":
         bucket = os.getenv("CLIP_SOURCE_S3_BUCKET")
         prefix = os.getenv("CLIP_SOURCE_S3_PREFIX", "")
-        new_videos = list_new_videos_s3(db, bucket, prefix, max_files=max_videos_per_run, dedup_days=dedup_days)
+        new_videos = list_new_videos_s3(db, bucket, prefix, max_files=candidate_pool_size, dedup_days=dedup_days)
         download_fn = download_video_s3
     elif source_mode == "youtube":
         channel_id = os.getenv("CLIP_SOURCE_YT_CHANNEL_ID")
@@ -663,7 +667,7 @@ def poll_and_clip(
             else:
                 search_query = clean_sq
 
-        new_videos = list_new_videos_youtube(db, channel_input=channel_id, playlist_id=playlist_id, search_query=search_query, max_videos=max_videos_per_run, dedup_days=dedup_days)
+        new_videos = list_new_videos_youtube(db, channel_input=channel_id, playlist_id=playlist_id, search_query=search_query, max_videos=candidate_pool_size, dedup_days=dedup_days)
         download_fn = download_video_youtube
     else:
         raise RuntimeError(f"Unknown CLIP_SOURCE_MODE: {source_mode} (must be 's3' or 'youtube')")
@@ -680,7 +684,18 @@ def poll_and_clip(
                     pass
 
     results = []
+    success_count = 0
+    fail_count = 0
+    max_failures = 5  # Safety cap on consecutive failures per run
+
     for src in new_videos:
+        if success_count >= max_videos_per_run:
+            logger.info(f"Reached target of {max_videos_per_run} successfully clipped video(s), stopping.")
+            break
+        if fail_count >= max_failures:
+            logger.warning(f"Reached maximum failure threshold ({fail_count} failures), terminating candidate search.")
+            break
+
         local_path = None
         try:
             local_path = download_fn(src, Path(pipeline.settings.clip_input_dir))
@@ -709,11 +724,16 @@ def poll_and_clip(
                 clip_errors = [o.error for o in pipeline_result.outcomes if o.error]
                 err_msg = "; ".join(clip_errors) if clip_errors else "no clips were published"
                 results.append((src, False, err_msg))
+                fail_count += 1
+                logger.warning(f"Candidate {src.video_id} produced no published clips: {err_msg}. Trying next candidate...")
             else:
                 results.append((src, True, None))
+                success_count += 1
+                logger.info(f"Successfully processed and published clip from {src.video_id} ({success_count}/{max_videos_per_run})")
         except Exception as exc:
-            logger.error(f"clipper failed for {src.video_id}: {exc}")
+            logger.warning(f"Clipper skipped candidate {src.video_id}: {exc}. Advancing to next candidate in pool...")
             results.append((src, False, str(exc)))
+            fail_count += 1
             try:
                 yt_id = getattr(src, "yt_video_id", None) or src.video_id
                 from datetime import datetime, timezone
