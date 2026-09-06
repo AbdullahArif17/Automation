@@ -302,10 +302,12 @@ def list_new_videos_youtube(
     max_videos: int = 50,
 ) -> list[SourceVideo]:
     """List new long-form videos from a YouTube channel or search query."""
-    # Load already-processed YouTube video IDs
+    # Load already-processed YouTube video IDs to guarantee zero repeats
     processed = set()
-    for row in db.fetchall("SELECT source_etag FROM videos WHERE source_type='clipped' AND source_etag IS NOT NULL"):
+    for row in db.fetchall("SELECT source_etag FROM videos WHERE source_etag IS NOT NULL"):
         processed.add(row["source_etag"])
+    for row in db.fetchall("SELECT youtube_video_id FROM videos WHERE youtube_video_id IS NOT NULL"):
+        processed.add(row["youtube_video_id"])
 
     items_to_process = []
     
@@ -658,6 +660,13 @@ def poll_and_clip(
             )
             if video_row:
                 mark_video_processed(db, src, local_path, video_row["id"])
+            else:
+                yt_id = getattr(src, "yt_video_id", None) or src.video_id
+                from datetime import datetime, timezone
+                db.execute(
+                    "INSERT INTO videos (topic, source_etag, source_type, status, created_at) VALUES (?, ?, 'clipped', 'PROCESSED', ?)",
+                    (f"clip:{yt_id}", yt_id, datetime.now(timezone.utc).isoformat()),
+                )
             if upload and not any_uploaded:
                 clip_errors = [o.error for o in pipeline_result.outcomes if o.error]
                 err_msg = "; ".join(clip_errors) if clip_errors else "no clips were published"
@@ -667,6 +676,15 @@ def poll_and_clip(
         except Exception as exc:
             logger.error(f"clipper failed for {src.video_id}: {exc}")
             results.append((src, False, str(exc)))
+            try:
+                yt_id = getattr(src, "yt_video_id", None) or src.video_id
+                from datetime import datetime, timezone
+                db.execute(
+                    "INSERT INTO videos (topic, source_etag, source_type, status, created_at) VALUES (?, ?, 'clipped', 'FAILED', ?)",
+                    (f"failed:{yt_id}", yt_id, datetime.now(timezone.utc).isoformat()),
+                )
+            except Exception:
+                pass
         finally:
             video_stem = getattr(src, "yt_video_id", None) or getattr(src, "video_id", None) or (local_path.stem if local_path else None)
             input_dir = Path(pipeline.settings.clip_input_dir)
