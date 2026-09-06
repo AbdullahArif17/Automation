@@ -712,5 +712,67 @@ def test_cut_segment_intro_punchin_included():
             assert "1.07-0.07*(t" in f
 
 
+def test_storage_poller_dedup_window(tmp_path):
+    """Verify that videos older than dedup_days cooldown can be re-clipped."""
+    from datetime import datetime, timezone, timedelta
+    from unittest.mock import patch
+    from app.storage.database import Database
+    from app.clipper.storage_poller import list_new_videos_youtube
+
+    db = Database(str(tmp_path / "test.db"))
+
+    now = datetime.now(timezone.utc)
+    recent_date = (now - timedelta(days=5)).isoformat()
+    old_date = (now - timedelta(days=45)).isoformat()
+
+    # Insert a recently clipped video (5 days ago)
+    db.execute(
+        "INSERT INTO videos (topic, source_etag, source_type, status, created_at) VALUES (?, ?, 'clipped', 'PROCESSED', ?)",
+        ("clip:recent_vid", "recent_vid", recent_date),
+    )
+    # Insert an old clipped video (45 days ago)
+    db.execute(
+        "INSERT INTO videos (topic, source_etag, source_type, status, created_at) VALUES (?, ?, 'clipped', 'PROCESSED', ?)",
+        ("clip:old_vid", "old_vid", old_date),
+    )
+
+    mock_search_results = {
+        "items": [
+            {"id": {"videoId": "recent_vid"}},
+            {"id": {"videoId": "old_vid"}},
+            {"id": {"videoId": "brand_new_vid"}},
+        ]
+    }
+    mock_video_details = {
+        "items": [{
+            "contentDetails": {"duration": "PT5M00S"},
+            "snippet": {"title": "Test Video Title"},
+            "statistics": {"viewCount": "50000"},
+        }]
+    }
+
+    def fake_yt_api(endpoint, params):
+        if endpoint == "search":
+            return mock_search_results
+        elif endpoint == "videos":
+            return mock_video_details
+        return {}
+
+    with patch("app.clipper.storage_poller._youtube_api_request", side_effect=fake_yt_api):
+        # 1. dedup_days=30: recent_vid is blocked, old_vid (45d) and brand_new_vid are allowed
+        videos = list_new_videos_youtube(db, search_query="test query", dedup_days=30)
+        ids = [v.yt_video_id for v in videos]
+        assert "recent_vid" not in ids
+        assert "old_vid" in ids
+        assert "brand_new_vid" in ids
+
+        # 2. dedup_days=0 (infinite / permanent deduplication): both recent_vid and old_vid are blocked
+        videos_forever = list_new_videos_youtube(db, search_query="test query", dedup_days=0)
+        ids_forever = [v.yt_video_id for v in videos_forever]
+        assert "recent_vid" not in ids_forever
+        assert "old_vid" not in ids_forever
+        assert "brand_new_vid" in ids_forever
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -258,11 +258,27 @@ def list_new_videos_s3(
     bucket: str,
     prefix: str = "",
     max_files: int = 50,
+    dedup_days: Optional[int] = None,
 ) -> list[SourceVideo]:
     """List unprocessed video files in S3 bucket/prefix."""
+    if dedup_days is None:
+        try:
+            dedup_days = int(os.getenv("CLIP_DEDUP_DAYS", "30"))
+        except ValueError:
+            dedup_days = 30
+
     processed = set()
-    for row in db.fetchall("SELECT source_etag, source_size FROM videos WHERE source_type='clipped' AND source_etag IS NOT NULL"):
-        processed.add((row["source_etag"], row["source_size"]))
+    if dedup_days > 0:
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=dedup_days)).isoformat()
+        for row in db.fetchall(
+            "SELECT source_etag, source_size FROM videos WHERE source_type='clipped' AND source_etag IS NOT NULL AND created_at >= ?",
+            (cutoff,),
+        ):
+            processed.add((row["source_etag"], row["source_size"]))
+    else:
+        for row in db.fetchall("SELECT source_etag, source_size FROM videos WHERE source_type='clipped' AND source_etag IS NOT NULL"):
+            processed.add((row["source_etag"], row["source_size"]))
 
     s3 = _get_s3_client()
     paginator = s3.get_paginator("list_objects_v2")
@@ -300,14 +316,29 @@ def list_new_videos_youtube(
     playlist_id: Optional[str] = None,
     search_query: Optional[str] = None,
     max_videos: int = 50,
+    dedup_days: Optional[int] = None,
 ) -> list[SourceVideo]:
     """List new long-form videos from a YouTube channel or search query."""
-    # Load already-processed YouTube video IDs to guarantee zero repeats
+    if dedup_days is None:
+        try:
+            dedup_days = int(os.getenv("CLIP_DEDUP_DAYS", "30"))
+        except ValueError:
+            dedup_days = 30
+
+    # Load already-processed YouTube video IDs within dedup window (default 30 days) to prevent repeats
     processed = set()
-    for row in db.fetchall("SELECT source_etag FROM videos WHERE source_etag IS NOT NULL"):
-        processed.add(row["source_etag"])
-    for row in db.fetchall("SELECT youtube_video_id FROM videos WHERE youtube_video_id IS NOT NULL"):
-        processed.add(row["youtube_video_id"])
+    if dedup_days > 0:
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=dedup_days)).isoformat()
+        for row in db.fetchall("SELECT source_etag FROM videos WHERE source_etag IS NOT NULL AND created_at >= ?", (cutoff,)):
+            processed.add(row["source_etag"])
+        for row in db.fetchall("SELECT youtube_video_id FROM videos WHERE youtube_video_id IS NOT NULL AND created_at >= ?", (cutoff,)):
+            processed.add(row["youtube_video_id"])
+    else:
+        for row in db.fetchall("SELECT source_etag FROM videos WHERE source_etag IS NOT NULL"):
+            processed.add(row["source_etag"])
+        for row in db.fetchall("SELECT youtube_video_id FROM videos WHERE youtube_video_id IS NOT NULL"):
+            processed.add(row["youtube_video_id"])
 
     items_to_process = []
     
@@ -606,10 +637,17 @@ def poll_and_clip(
         else:
             raise RuntimeError("No clip source configured. Set CLIP_SOURCE_S3_BUCKET, CLIP_SOURCE_YT_CHANNEL_ID, or CLIP_SOURCE_YT_SEARCH_QUERY")
 
+    dedup_days = getattr(settings, "clip_dedup_days", None)
+    if dedup_days is None:
+        try:
+            dedup_days = int(os.getenv("CLIP_DEDUP_DAYS", "30"))
+        except ValueError:
+            dedup_days = 30
+
     if source_mode == "s3":
         bucket = os.getenv("CLIP_SOURCE_S3_BUCKET")
         prefix = os.getenv("CLIP_SOURCE_S3_PREFIX", "")
-        new_videos = list_new_videos_s3(db, bucket, prefix, max_files=max_videos_per_run)
+        new_videos = list_new_videos_s3(db, bucket, prefix, max_files=max_videos_per_run, dedup_days=dedup_days)
         download_fn = download_video_s3
     elif source_mode == "youtube":
         channel_id = os.getenv("CLIP_SOURCE_YT_CHANNEL_ID")
@@ -625,7 +663,7 @@ def poll_and_clip(
             else:
                 search_query = clean_sq
 
-        new_videos = list_new_videos_youtube(db, channel_input=channel_id, playlist_id=playlist_id, search_query=search_query, max_videos=max_videos_per_run)
+        new_videos = list_new_videos_youtube(db, channel_input=channel_id, playlist_id=playlist_id, search_query=search_query, max_videos=max_videos_per_run, dedup_days=dedup_days)
         download_fn = download_video_youtube
     else:
         raise RuntimeError(f"Unknown CLIP_SOURCE_MODE: {source_mode} (must be 's3' or 'youtube')")
