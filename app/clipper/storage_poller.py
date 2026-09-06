@@ -391,13 +391,28 @@ def list_new_videos_youtube(
             continue
         v = vitems[0]
         duration_iso = v["contentDetails"].get("duration", "PT0S")
-        # Parse ISO 8601 duration (e.g., PT15M33S -> 933s)
+        # Parse ISO 8601 duration (e.g., PT15M33S -> 933s, P1DT2H -> 93600s)
         import re
-        dur_match = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", duration_iso)
-        hours = int(dur_match.group(1) or 0)
-        minutes = int(dur_match.group(2) or 0)
-        seconds = int(dur_match.group(3) or 0)
-        duration_secs = hours * 3600 + minutes * 60 + seconds
+        dur_match = re.match(r"^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$", duration_iso)
+        if not dur_match:
+            h_match = re.search(r"(\d+)H", duration_iso)
+            m_match = re.search(r"(\d+)M", duration_iso)
+            s_match = re.search(r"(\d+)S", duration_iso)
+            d_match = re.search(r"(\d+)D", duration_iso)
+            if not any([h_match, m_match, s_match, d_match]):
+                logger.info(f"Skipping video with unparseable or zero duration '{duration_iso}': {v.get('snippet', {}).get('title')}")
+                continue
+            days = int(d_match.group(1)) if d_match else 0
+            hours = int(h_match.group(1)) if h_match else 0
+            minutes = int(m_match.group(1)) if m_match else 0
+            seconds = int(s_match.group(1)) if s_match else 0
+            duration_secs = days * 86400 + hours * 3600 + minutes * 60 + seconds
+        else:
+            days = int(dur_match.group(1) or 0)
+            hours = int(dur_match.group(2) or 0)
+            minutes = int(dur_match.group(3) or 0)
+            seconds = int(dur_match.group(4) or 0)
+            duration_secs = days * 86400 + hours * 3600 + minutes * 60 + seconds
 
         title = v["snippet"].get("title", "Untitled")
         title_lower = title.lower()
