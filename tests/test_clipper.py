@@ -112,8 +112,7 @@ def test_parse_highlight_response_missing_field():
     response = json.dumps({
         "candidates": [{
             "start_seconds": 10.0,
-            "end_seconds": 40.0,
-            # missing reason, title, etc.
+            # missing end_seconds
         }]
     })
     with pytest.raises(ValueError, match="missing required field"):

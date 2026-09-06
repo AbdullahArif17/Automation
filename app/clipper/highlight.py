@@ -123,22 +123,23 @@ def parse_highlight_response(response: str, min_dur: float, max_dur: float, vide
 
     candidates = []
     for c in data["candidates"]:
-        # Validate required fields (supporting common LLM aliases)
+        if not isinstance(c, dict):
+            continue
+
         if "start_seconds" not in c and "start" not in c:
             raise ValueError("Candidate missing required field: start_seconds")
         if "end_seconds" not in c and "end" not in c:
             raise ValueError("Candidate missing required field: end_seconds")
-        if "reason" not in c and "explanation" not in c and "why" not in c:
-            raise ValueError("Candidate missing required field: reason")
-        if "suggested_title" not in c and "title" not in c and "headline" not in c:
-            raise ValueError("Candidate missing required field: suggested_title")
-        if "suggested_description" not in c and "description" not in c and "summary" not in c:
-            raise ValueError("Candidate missing required field: suggested_description")
-        if "confidence" not in c and "score" not in c:
-            raise ValueError("Candidate missing required field: confidence")
 
-        start = float(c.get("start_seconds") if "start_seconds" in c else c["start"])
-        end = float(c.get("end_seconds") if "end_seconds" in c else c["end"])
+        start_raw = c.get("start_seconds") if "start_seconds" in c else c.get("start")
+        end_raw = c.get("end_seconds") if "end_seconds" in c else c.get("end")
+
+        try:
+            start = float(start_raw)
+            end = float(end_raw)
+        except (ValueError, TypeError):
+            continue
+
         dur = end - start
 
         # If slightly over max_dur (e.g. 60.5s or 63s), clamp to max_dur gracefully
@@ -159,21 +160,35 @@ def parse_highlight_response(response: str, min_dur: float, max_dur: float, vide
             continue
 
         # Extract title and description with flexible key fallbacks
-        title = (c.get("suggested_title") or c.get("title") or c.get("headline") or "").strip()
+        title = (
+            c.get("suggested_title")
+            or c.get("title")
+            or c.get("headline")
+            or c.get("clip_title")
+            or c.get("short_title")
+            or c.get("name")
+            or ""
+        ).strip()
         if not title:
-            title = "Viral Highlight Clip"
+            title = "Unscripted Moment You Won't Believe #shorts"
         if "#shorts" not in title.lower() and len(title) <= 45:
             title = f"{title} #shorts"
         title = title[:60].strip()
 
-        desc = (c.get("suggested_description") or c.get("description") or c.get("summary") or "").strip()
+        desc = (
+            c.get("suggested_description")
+            or c.get("description")
+            or c.get("summary")
+            or c.get("desc")
+            or ""
+        ).strip()
         if not desc:
             desc = f"{title}\n\nSubscribe for more daily clips! #shorts"
 
         reason = c.get("reason") or c.get("explanation") or c.get("why") or "Standalone highlight"
 
         try:
-            conf = float(c.get("confidence", 0.85))
+            conf = float(c.get("confidence") or c.get("score") or 0.85)
         except (ValueError, TypeError):
             conf = 0.85
 
