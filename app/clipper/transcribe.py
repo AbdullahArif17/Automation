@@ -87,9 +87,10 @@ class TranscriptResult:
 def get_whisper_model(model_size: str = "base.en", device: str = "cpu", compute_type: str = "int8"):
     """Load faster-whisper model (cached)."""
     from faster_whisper import WhisperModel
-    logger.info(f"loading faster-whisper model '{model_size}' on {device}",
+    threads = int(os.getenv("WHISPER_THREADS", "2"))
+    logger.info(f"loading faster-whisper model '{model_size}' on {device} (cpu_threads={threads})",
                 extra={"stage": "transcribe", "status": "loading"})
-    return WhisperModel(model_size, device=device, compute_type=compute_type)
+    return WhisperModel(model_size, device=device, compute_type=compute_type, cpu_threads=threads)
 
 
 def transcribe_video(
@@ -97,7 +98,7 @@ def transcribe_video(
     model_size: str = "base.en",
     device: str = "cpu",
     compute_type: str = "int8",
-    beam_size: int = 5,
+    beam_size: Optional[int] = None,
     word_timestamps: bool = True,
 ) -> TranscriptResult:
     """Transcribe a video file with word-level timestamps.
@@ -108,12 +109,17 @@ def transcribe_video(
                     Use 'base.en' for English-only (faster).
         device: 'cpu' or 'cuda'.
         compute_type: 'int8' (fastest, less accurate), 'int8_float16', 'float16', 'float32'.
-        beam_size: Beam size for decoding.
+        beam_size: Beam size for decoding (default 1 for fast greedy decoding).
         word_timestamps: Whether to return word-level timestamps.
 
     Returns:
         TranscriptResult with segments and word timestamps.
     """
+    if beam_size is None:
+        try:
+            beam_size = int(os.getenv("WHISPER_BEAM_SIZE", "1"))
+        except ValueError:
+            beam_size = 1
     if not Path(video_path).exists():
         raise FileNotFoundError(f"video not found: {video_path}")
 
