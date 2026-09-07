@@ -1,0 +1,36 @@
+# Virtual environments
+venv/
+.venv/
+miniconda.sh
+
+# Test suites & temporary pytest output
+tests/
+.pytest_cache/
+.pytest_tmp/
+.pytest_review_tmp/
+conftest.py
+
+# Raw media & audio processing files (hundreds of MB)
+*.MOV
+*.mov
+*.mp3
+*.wav
+*.mp4
+input/
+output/
+channel_assets/
+branding_channel2/
+data/
+IMG_1381_transcript_base.en.json
+
+# Local keys, cookies & environment secrets
+*.key
+cookies*.txt
+run_wsl.txt
+
+# Python caches & build metadata
+__pycache__/
+*.pyc
+*.egg-info/
+Dockerfile
+docker-compose.yml
