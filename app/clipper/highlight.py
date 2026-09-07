@@ -202,6 +202,12 @@ def parse_highlight_response(response: str, min_dur: float, max_dur: float, vide
             hook = " ".join(words[:4]).upper() + " 😳"
         hook = hook[:50].strip()
 
+        # Sanitize metadata against raw profanities
+        from app.utils.censor import censor_text
+        title = censor_text(title)
+        hook = censor_text(hook)
+        desc = censor_text(desc)
+
         candidates.append(ClipCandidate(
             start_seconds=start,
             end_seconds=end,

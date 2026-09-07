@@ -152,6 +152,10 @@ def build_caption_track_from_whisper(
     if provider:
         clip_words = correct_words_with_llm(clip_words, provider=provider, context=clip.suggested_title)
 
+    # Automatically censor profanity with asterisks (e.g. f*ck, sh*t) to protect monetization
+    from app.utils.censor import censor_word_tuples
+    clip_words = censor_word_tuples(clip_words)
+
     # Group words into lines by max_chars_per_line
     lines: list[list[tuple[str, float, float]]] = []
     current_line: list[tuple[str, float, float]] = []

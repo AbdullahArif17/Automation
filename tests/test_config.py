@@ -11,7 +11,9 @@ from app.config.settings import Settings, DEFAULT_TOPIC_WEIGHTS
 from app.main import main
 
 
-def test_settings_defaults():
+def test_settings_defaults(monkeypatch):
+    monkeypatch.delenv("MIN_VIDEO_DURATION", raising=False)
+    monkeypatch.delenv("MAX_VIDEO_DURATION", raising=False)
     s = Settings(
         data_dir=Path("/tmp/yt_test_data"),
         output_dir=Path("/tmp/yt_test_out"),
