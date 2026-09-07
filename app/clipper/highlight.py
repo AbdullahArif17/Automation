@@ -253,14 +253,24 @@ def select_highlights(
     max_dur = max_dur or settings.max_video_duration
 
     if provider is None:
-        provider = GeminiProvider()
+        if settings.llm_provider.lower() == "ollama":
+            from app.ai.ollama import OllamaProvider
+            provider = OllamaProvider()
+        else:
+            try:
+                provider = GeminiProvider()
+            except Exception as e:
+                logger.warning(f"GeminiProvider init failed ({e}), falling back to OllamaProvider",
+                               extra={"job_id": job_id, "stage": "highlight", "status": "ollama_fallback"})
+                from app.ai.ollama import OllamaProvider
+                provider = OllamaProvider()
 
     prompt = build_highlight_prompt(transcript, min_dur, max_dur)
 
-    logger.info(f"requesting highlights from LLM (video duration: {transcript.duration:.1f}s)",
+    logger.info(f"requesting highlights from LLM (video duration: {transcript.duration:.1f}s, provider: {type(provider).__name__})",
                 extra={"job_id": job_id, "stage": "highlight", "status": "request"})
 
-    # Try up to 2 times for malformed responses
+    # Try up to 2 times with automatic fallback to Ollama on failure
     for attempt in range(1, 3):
         try:
             response = provider.generate(prompt, temperature=0.3)
@@ -275,10 +285,19 @@ def select_highlights(
                         extra={"job_id": job_id, "stage": "highlight", "status": "done"})
             return candidates[:max_candidates]
 
-        except (json.JSONDecodeError, ValueError) as exc:
+        except Exception as exc:
+            from app.ai.ollama import OllamaProvider
+            if not isinstance(provider, OllamaProvider) and attempt == 1:
+                logger.warning(
+                    f"Gemini highlight selection failed ({exc}); falling back to local Ollama ({settings.ollama_model})...",
+                    extra={"job_id": job_id, "stage": "highlight", "status": "ollama_fallback"}
+                )
+                provider = OllamaProvider()
+                continue
+
             logger.warning(f"highlight selection attempt {attempt} failed: {exc}",
                            extra={"job_id": job_id, "stage": "highlight", "status": "retry", "attempt": attempt})
             if attempt == 2:
-                raise RuntimeError(f"Gemini failed to return valid highlights after 2 attempts: {exc}")
+                raise RuntimeError(f"LLM failed to return valid highlights after 2 attempts: {exc}")
 
     raise RuntimeError("highlight selection failed unexpectedly")

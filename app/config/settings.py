@@ -92,6 +92,9 @@ class Settings:
     max_video_duration: int = field(default_factory=lambda: _env_int("MAX_VIDEO_DURATION", 60))
 
     # Providers
+    llm_provider: str = field(default_factory=lambda: os.getenv("LLM_PROVIDER", "gemini"))
+    ollama_model: str = field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "qwen2.5-coder:3b"))
+    ollama_base_url: str = field(default_factory=lambda: os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"))
     tts_provider: str = field(default_factory=lambda: os.getenv("TTS_PROVIDER", "auto"))
     media_provider: str = field(default_factory=lambda: os.getenv("MEDIA_PROVIDER", "free"))
 

@@ -773,5 +773,45 @@ def test_storage_poller_dedup_window(tmp_path):
         assert "brand_new_vid" in ids_forever
 
 
+def test_select_highlights_fallback_to_ollama():
+    """When GeminiProvider fails, select_highlights should fall back to OllamaProvider."""
+    from unittest.mock import MagicMock, patch
+    from app.clipper.highlight import select_highlights
+    from app.clipper.transcribe import TranscriptResult, SegmentTimestamp
+
+    transcript = TranscriptResult(
+        language="en",
+        language_probability=1.0,
+        duration=30.0,
+        segments=[
+            SegmentTimestamp(text="Hello world test", start=0.0, end=30.0, words=[])
+        ],
+        source_path="/dummy.mp4"
+    )
+
+    mock_ollama_resp = json.dumps({
+        "candidates": [{
+            "start_seconds": 0.0,
+            "end_seconds": 30.0,
+            "reason": "great hook",
+            "suggested_title": "Test Title",
+            "hook_headline": "WOW AMAZING 💀",
+            "suggested_description": "Desc #shorts",
+            "confidence": 0.95
+        }]
+    })
+
+    # Gemini fails with 429 ResourceExhausted
+    mock_gemini = MagicMock()
+    mock_gemini.generate.side_effect = RuntimeError("429 ResourceExhausted: quota exceeded")
+
+    with patch("app.clipper.highlight.GeminiProvider", return_value=mock_gemini), \
+         patch("app.ai.ollama.OllamaProvider.generate", return_value=mock_ollama_resp):
+        candidates = select_highlights(transcript)
+        assert len(candidates) == 1
+        assert "Test Title" in candidates[0].suggested_title
+        assert candidates[0].confidence == 0.95
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

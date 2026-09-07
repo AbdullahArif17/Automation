@@ -95,3 +95,29 @@ def test_script_generator_regenerates_on_failure():
     best = gen.generate("topic")
     assert best is not None
     assert not best.evaluation.passed  # never passed threshold
+
+
+def test_ollama_provider_url_and_model():
+    from app.ai.ollama import OllamaProvider
+    p = OllamaProvider(model="custom-model", base_url="http://127.0.0.1:11434")
+    assert p.model == "custom-model"
+    assert p.endpoint_url == "http://127.0.0.1:11434/v1/chat/completions"
+
+    p2 = OllamaProvider(base_url="http://127.0.0.1:11434/v1")
+    assert p2.endpoint_url == "http://127.0.0.1:11434/v1/chat/completions"
+
+
+def test_ollama_provider_generate_mock():
+    from unittest.mock import patch, MagicMock
+    from app.ai.ollama import OllamaProvider
+
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = json.dumps({
+        "choices": [{"message": {"content": '{"candidates": []}'}}]
+    }).encode("utf-8")
+
+    with patch("urllib.request.urlopen") as mock_open:
+        mock_open.return_value.__enter__.return_value = mock_resp
+        provider = OllamaProvider()
+        res = provider.generate("hello")
+        assert res == '{"candidates": []}'
