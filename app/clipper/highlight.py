@@ -48,18 +48,20 @@ class ClipCandidate:
         }
 
 
-def build_highlight_prompt(transcript: TranscriptResult, min_dur: float, max_dur: float) -> str:
-    """Build the prompt for Gemini to select highlights."""
+def build_highlight_prompt(transcript: TranscriptResult, min_dur: float, max_dur: float, topic_context: Optional[str] = None) -> str:
+    """Build the prompt for Gemini/Ollama to select highlights."""
     # Concatenate all segments with timestamps for context
     full_text = ""
     for seg in transcript.segments:
         full_text += f"[{seg.start:.1f}-{seg.end:.1f}] {seg.text}\n"
 
+    context_block = f"\nSOURCE TOPIC / CONTEXT: {topic_context}\n" if topic_context else ""
+
     return f"""You are an elite YouTube Shorts curator and viral video editor.
 Given the timestamped transcript below from a long-form video, identify 1-3 segments that will make powerful, self-contained standalone Shorts (25-45 seconds is the sweet spot).
 
 The most important rule: ANY VIEWER who has never seen this podcast or video before MUST be hooked within the first 3 seconds. The clip must feel like a complete, satisfying mini-story or argument, NOT a random chopped fragment.
-
+{context_block}
 SOURCE VIDEO DURATION: {transcript.duration:.1f} seconds
 TARGET SHORT DURATION: {min_dur:.0f}-{max_dur:.0f} seconds (optimal: 25-45s)
 TARGET AUDIENCE: United States, Canada, and United Kingdom. Prioritize moments that grip Western audiences: recognizable celebrities, entrepreneurs, intense debates, shocking admissions, or universally relatable humor.
@@ -101,7 +103,11 @@ STRICT QUALITY RULES:
 6. CROP MODE:
    - Use 'center' for interviews, podcasts, gym, and centered subjects.
    - Use 'blur' for gaming or wide group panels where edges matter.
-7. Return 1-3 candidates, best first.
+7. ACCURATE CELEBRITY & SPEAKER NAMES (CRITICAL):
+   - Use the SOURCE TOPIC / CONTEXT to verify exact celebrity and speaker identities.
+   - Do NOT confuse similar actor names (e.g., Tom Holland is Spider-Man; Tom Hiddleston is Loki. Chris Evans is Captain America; Chris Hemsworth is Thor. Ryan Reynolds is Deadpool; Ryan Gosling is Barbie/Drive).
+   - If unsure of an actor's surname from transcript context, refer to their famous character or role (e.g. 'Spider-Man Actor') rather than guessing the wrong name.
+8. Return 1-3 candidates, best first.
 """
 
 
@@ -234,8 +240,9 @@ def select_highlights(
     max_dur: Optional[float] = None,
     max_candidates: int = 3,
     job_id: Optional[str] = None,
+    topic_context: Optional[str] = None,
 ) -> list[ClipCandidate]:
-    """Select highlight segments from transcript using Gemini.
+    """Select highlight segments from transcript using Gemini/Ollama.
 
     Args:
         transcript: TranscriptResult from transcribe step.
@@ -244,6 +251,7 @@ def select_highlights(
         max_dur: Maximum clip duration (from settings if None).
         max_candidates: Max number of candidates to return.
         job_id: Job ID for logging.
+        topic_context: Optional search query / topic context string for speaker disambiguation.
 
     Returns:
         List of ClipCandidate, sorted by confidence (best first).
@@ -265,7 +273,7 @@ def select_highlights(
                 from app.ai.ollama import OllamaProvider
                 provider = OllamaProvider()
 
-    prompt = build_highlight_prompt(transcript, min_dur, max_dur)
+    prompt = build_highlight_prompt(transcript, min_dur, max_dur, topic_context=topic_context)
 
     logger.info(f"requesting highlights from LLM (video duration: {transcript.duration:.1f}s, provider: {type(provider).__name__})",
                 extra={"job_id": job_id, "stage": "highlight", "status": "request"})

@@ -142,6 +142,7 @@ class ClipperPipeline:
                 max_dur=self.settings.max_video_duration,
                 max_candidates=max_clips,
                 job_id=jid,
+                topic_context=topic_category,
             )
             if not candidates:
                 raise RuntimeError("no valid highlight candidates found")
