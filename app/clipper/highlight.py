@@ -66,7 +66,7 @@ The most important rule: ANY VIEWER who has never seen this podcast or video bef
 {context_block}
 SOURCE VIDEO DURATION: {transcript.duration:.1f} seconds
 TARGET SHORT DURATION: {min_dur:.0f}-{max_dur:.0f} seconds (optimal: 25-45s)
-TARGET AUDIENCE: United States, Canada, and United Kingdom. Prioritize moments that grip Western audiences: recognizable celebrities, entrepreneurs, intense debates, shocking admissions, or universally relatable humor.
+TARGET AUDIENCE: United States, Canada, and United Kingdom. Prioritize moments that grip Western audiences: recognizable celebrities, intense relationship/dating debates, shocking confessions, savage rejections, controversial opinions, or high-stakes drama.
 
 TRANSCRIPT:
 {full_text}
@@ -79,8 +79,8 @@ Return ONLY valid JSON matching this exact schema:
       "end_seconds": <float>,
       "reason": "<explain the context, who is speaking, what the core idea/punchline is, and why it works as a standalone Short>",
       "suggested_title": "<punchy curiosity hook naming person/topic, max 50 chars for mobile>",
-      "hook_headline": "<3-5 word curiosity hook in ALL CAPS with 1 emoji, e.g. 'HE REALLY SAID THIS... 😳' or 'WAIT FOR THE REACTION 💀'>",
-      "comment_question": "<provocative or debate-sparking question related to this moment to ask viewers in the comments/description, e.g. 'Did he go too far? 👇' or 'Who was in the right? 👇'>",
+      "hook_headline": "<3-5 word curiosity hook in ALL CAPS with 1 emoji, e.g. 'SHE REALLY SAID THIS... 😳' or 'THE DISRESPECT IS UNREAL 💀' or 'WAIT FOR HER REASON 😭'>",
+      "comment_question": "<provocative or debate-sparking question related to this moment to ask viewers in the comments/description, e.g. 'Is this an instant red flag? 👇' or 'Who was out of line here? 👇'>",
       "suggested_description": "<2 context-rich sentences explaining who is talking and what happened + high-volume search keywords + 'Subscribe for more!' + 4 specific #hashtags + #shorts>",
       "confidence": <0.0-1.0>,
       "crop_mode": "<'center' or 'blur'>"
@@ -99,7 +99,7 @@ STRICT QUALITY RULES:
    - Must explicitly name the person, topic, or conflict (e.g., 'Joe Rogan on the 1994 Own Goal' or 'Ronaldo Explains Why He Left').
    - Keep under 50 chars so the title is never cut off by '...' on mobile screens.
 4. TOP HOOK HEADLINE:
-   - Provide a punchy 3-5 word curiosity hook in ALL CAPS with 1 emoji to overlay at top of screen (e.g., 'HE COULDN'T BELIEVE THIS 😳' or 'THE SHOCKING TRUTH 🤫').
+   - Provide a punchy 3-5 word curiosity hook in ALL CAPS with 1 emoji to overlay at top of screen (e.g., 'SHE REALLY SAID THIS... 😳', 'THE DISRESPECT IS UNREAL 💀', 'HE DID NOT HOLD BACK 💀', 'COULD NEVER BE ME 😭').
 5. STRICT DURATION BOUNDS (CRITICAL):
    - Duration MUST be between {min_dur:.0f} and {max_dur:.0f} seconds (optimal sweet spot is 28-45s for 80%+ completion rate).
    - Snippets under {min_dur:.0f}s or over {max_dur:.0f}s will be rejected.
@@ -111,8 +111,11 @@ STRICT QUALITY RULES:
    - Do NOT confuse similar actor names (e.g., Tom Holland is Spider-Man; Tom Hiddleston is Loki. Chris Evans is Captain America; Chris Hemsworth is Thor. Ryan Reynolds is Deadpool; Ryan Gosling is Barbie/Drive).
    - If unsure of an actor's surname from transcript context, refer to their famous character or role (e.g. 'Spider-Man Actor') rather than guessing the wrong name.
 8. ENGAGEMENT QUESTION (CRITICAL FOR COMMENTS):
-   - Provide a provocative debate question in 'comment_question' to hook viewers into commenting.
-9. Return 1-3 candidates, best first.
+   - Provide a provocative debate question in 'comment_question' to hook viewers into fierce comment debates (e.g., 'Is this an instant dealbreaker? 👇' or 'Who was in the right? 👇').
+9. VIRAL TENSION & SPICY DYNAMICS (CRITICAL):
+   - Prioritize moments with the highest emotional tension: heated dating debates, shocking relationship confessions, savage rejections, awkward flirting, or controversial moral dilemmas.
+   - If a video contains a spicy or jaw-dropping exchange, always select it as candidate #1.
+10. Return 1-3 candidates, best first.
 """
 
 

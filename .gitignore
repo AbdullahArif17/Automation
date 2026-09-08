@@ -58,3 +58,11 @@ ssh-key-2026-09-02.key
 channel_assets
 branding_channel2
 branding_channel3
+stop_tunnel.cmd
+start_tunnel_silent.vbs
+check_server_status.cmd
+launch_claude_qwen.cmd
+connect_server.cmd
+run_local_pipeline_wsl.cmd
+.gitignore
+start_tunnel.cmd
