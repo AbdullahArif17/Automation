@@ -342,6 +342,7 @@ class ClipperPipeline:
             tags,
             privacy_status=privacy,
             job_id=str(job_db_id),
+            comment_text=getattr(candidate, "comment_question", None),
         )
 
         self.db.execute(

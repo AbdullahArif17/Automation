@@ -29,6 +29,7 @@ class ClipCandidate:
     confidence: float  # 0-1, model's confidence this will work as a Short
     crop_mode: str = "center"  # 'center' or 'blur'
     hook_headline: str = ""  # 3-5 word curiosity hook banner in ALL CAPS + emoji
+    comment_question: str = ""  # provocative debate question to drive viewer comments
 
     @property
     def duration(self) -> float:
@@ -45,6 +46,7 @@ class ClipCandidate:
             "confidence": self.confidence,
             "crop_mode": self.crop_mode,
             "hook_headline": self.hook_headline,
+            "comment_question": self.comment_question,
         }
 
 
@@ -78,6 +80,7 @@ Return ONLY valid JSON matching this exact schema:
       "reason": "<explain the context, who is speaking, what the core idea/punchline is, and why it works as a standalone Short>",
       "suggested_title": "<punchy curiosity hook naming person/topic, max 50 chars for mobile>",
       "hook_headline": "<3-5 word curiosity hook in ALL CAPS with 1 emoji, e.g. 'HE REALLY SAID THIS... 😳' or 'WAIT FOR THE REACTION 💀'>",
+      "comment_question": "<provocative or debate-sparking question related to this moment to ask viewers in the comments/description, e.g. 'Did he go too far? 👇' or 'Who was in the right? 👇'>",
       "suggested_description": "<2 context-rich sentences explaining who is talking and what happened + high-volume search keywords + 'Subscribe for more!' + 4 specific #hashtags + #shorts>",
       "confidence": <0.0-1.0>,
       "crop_mode": "<'center' or 'blur'>"
@@ -107,7 +110,9 @@ STRICT QUALITY RULES:
    - Use the SOURCE TOPIC / CONTEXT to verify exact celebrity and speaker identities.
    - Do NOT confuse similar actor names (e.g., Tom Holland is Spider-Man; Tom Hiddleston is Loki. Chris Evans is Captain America; Chris Hemsworth is Thor. Ryan Reynolds is Deadpool; Ryan Gosling is Barbie/Drive).
    - If unsure of an actor's surname from transcript context, refer to their famous character or role (e.g. 'Spider-Man Actor') rather than guessing the wrong name.
-8. Return 1-3 candidates, best first.
+8. ENGAGEMENT QUESTION (CRITICAL FOR COMMENTS):
+   - Provide a provocative debate question in 'comment_question' to hook viewers into commenting.
+9. Return 1-3 candidates, best first.
 """
 
 
@@ -214,6 +219,20 @@ def parse_highlight_response(response: str, min_dur: float, max_dur: float, vide
         hook = censor_text(hook)
         desc = censor_text(desc)
 
+        comment_q = (
+            c.get("comment_question")
+            or c.get("question")
+            or c.get("debate_question")
+            or ""
+        ).strip()
+        if not comment_q:
+            comment_q = "What do you think about this? Drop your thoughts below! 👇"
+        comment_q = censor_text(comment_q[:150])
+
+        # Prepend engagement question to top of description so 100% of viewers see it
+        if comment_q and not desc.startswith("👇"):
+            desc = f"👇 {comment_q}\n\n{desc}"
+
         candidates.append(ClipCandidate(
             start_seconds=start,
             end_seconds=end,
@@ -223,6 +242,7 @@ def parse_highlight_response(response: str, min_dur: float, max_dur: float, vide
             confidence=conf,
             crop_mode=c_mode,
             hook_headline=hook,
+            comment_question=comment_q,
         ))
 
     if not candidates:

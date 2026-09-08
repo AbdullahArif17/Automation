@@ -108,6 +108,27 @@ def test_parse_highlight_response_code_fence():
     assert len(candidates) == 1
 
 
+def test_parse_highlight_response_comment_question():
+    """Verify comment_question is extracted and prepended to description."""
+    response = json.dumps({
+        "candidates": [{
+            "start_seconds": 10.0,
+            "end_seconds": 40.0,
+            "reason": "Dramatic debate",
+            "suggested_title": "Tom Holland Handshake",
+            "comment_question": "Did he do the handshake right?",
+            "suggested_description": "Tom explains the handshake. Subscribe! #shorts",
+            "confidence": 0.9,
+        }]
+    })
+    candidates = parse_highlight_response(response, 20.0, 60.0, 300.0)
+    assert len(candidates) == 1
+    c = candidates[0]
+    assert c.comment_question == "Did he do the handshake right?"
+    assert c.suggested_description.startswith("👇 Did he do the handshake right?\n\n")
+
+
+
 def test_parse_highlight_response_missing_field():
     response = json.dumps({
         "candidates": [{

@@ -129,6 +129,78 @@ def test_upload_init_failure():
             uploader.upload("fake.mp4", "Title", "Desc", ["tag"])
 
 
+def test_upload_with_comment_success():
+    auth = YouTubeAuth(client_id="c", client_secret="s", refresh_token="r")
+    uploader = YouTubeUploader(auth=auth)
+    import contextlib
+    import urllib.error
+
+    init_cm = contextlib.nullcontext(MagicMock(
+        headers=MagicMock(get=lambda k: "https://upload.example.com/abc")
+    ))
+    video_cm = contextlib.nullcontext(MagicMock(
+        read=lambda: json.dumps({"id": "vid_xyz"}).encode()
+    ))
+    comment_cm = contextlib.nullcontext(MagicMock(
+        read=lambda: json.dumps({"id": "comment_123"}).encode()
+    ))
+
+    calls = {"count": 0}
+    def mock_urlopen(req, timeout=30):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return init_cm
+        elif calls["count"] == 2:
+            return video_cm
+        else:
+            return comment_cm
+
+    with patch("urllib.request.urlopen", side_effect=mock_urlopen), \
+         patch("os.path.exists", return_value=True), \
+         patch("os.path.getsize", return_value=1000000), \
+         patch("builtins.open", MagicMock()), \
+         patch.object(auth, "credentials", return_value=YouTubeCredentials("tok")):
+        res = uploader.upload("fake.mp4", "Title", "Desc", ["tag"], "private", comment_text="Did he win?")
+        assert res.video_id == "vid_xyz"
+        assert calls["count"] == 3
+
+
+def test_upload_with_comment_403_failsoft():
+    """If YouTube API returns 403 (insufficientPermissions), upload must still succeed."""
+    auth = YouTubeAuth(client_id="c", client_secret="s", refresh_token="r")
+    uploader = YouTubeUploader(auth=auth)
+    import contextlib
+    import urllib.error
+
+    init_cm = contextlib.nullcontext(MagicMock(
+        headers=MagicMock(get=lambda k: "https://upload.example.com/abc")
+    ))
+    video_cm = contextlib.nullcontext(MagicMock(
+        read=lambda: json.dumps({"id": "vid_xyz"}).encode()
+    ))
+
+    calls = {"count": 0}
+    def mock_urlopen(req, timeout=30):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return init_cm
+        elif calls["count"] == 2:
+            return video_cm
+        else:
+            raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, None)
+
+    with patch("urllib.request.urlopen", side_effect=mock_urlopen), \
+         patch("os.path.exists", return_value=True), \
+         patch("os.path.getsize", return_value=1000000), \
+         patch("builtins.open", MagicMock()), \
+         patch.object(auth, "credentials", return_value=YouTubeCredentials("tok")):
+        # Should not raise exception
+        res = uploader.upload("fake.mp4", "Title", "Desc", ["tag"], "private", comment_text="Did he win?")
+        assert res.video_id == "vid_xyz"
+        assert calls["count"] == 3
+
+
+
 # --- YouTube Trending Topics tests --------------------------------------------
 
 def test_trending_topic_dataclass():

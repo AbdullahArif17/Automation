@@ -51,6 +51,7 @@ class YouTubeUploader:
         privacy_status: str = "private",
         category_id: str = "24",  # Entertainment (broadest & highest performing for clips/talk/podcasts)
         job_id: Optional[str] = None,
+        comment_text: Optional[str] = None,
     ) -> UploadResult:
         creds = self._ensure_auth()
         if not os.path.exists(video_path):
@@ -78,13 +79,16 @@ class YouTubeUploader:
                 "defaultLanguage": "en-US",
                 "defaultAudioLanguage": "en-US",
             },
-            "status": {"privacyStatus": privacy_status, "selfDeclaredMadeForKids": False},
+            "status": {
+                "privacyStatus": privacy_status,
+                "selfDeclaredMadeForKids": False,
+            },
         }
-        meta_json = json.dumps(metadata).encode("utf-8")
+        init_data = json.dumps(metadata).encode("utf-8")
 
         init_req = urllib.request.Request(
-            f"{UPLOAD_URL}?uploadType=resumable&part=snippet,status,statistics",
-            data=meta_json,
+            f"{UPLOAD_URL}?uploadType=resumable&part=snippet,status",
+            data=init_data,
             headers={
                 **creds.auth_header(),
                 "Content-Type": "application/json; charset=UTF-8",
@@ -141,8 +145,60 @@ class YouTubeUploader:
         url = f"https://youtu.be/{video_id}"
         logger.info(f"uploaded video {video_id} ({privacy_status})",
                     extra={"job_id": job_id, "stage": "youtube_upload", "status": "done"})
+
+        # Safely attempt to post engagement hook comment (if configured/permitted)
+        if comment_text:
+            self._try_post_comment(creds, video_id, comment_text, job_id=job_id)
+
         return UploadResult(video_id=video_id, title=title,
                             privacy_status=privacy_status, url=url)
+
+    def _try_post_comment(
+        self,
+        creds: YouTubeCredentials,
+        video_id: str,
+        comment_text: str,
+        job_id: Optional[str] = None,
+    ) -> None:
+        """Safely attempt to post a discussion comment to spark debate; fail soft if scope is missing."""
+        if not comment_text or not comment_text.strip():
+            return
+        body = {
+            "snippet": {
+                "videoId": video_id,
+                "topLevelComment": {
+                    "snippet": {
+                        "textOriginal": comment_text.strip()
+                    }
+                }
+            }
+        }
+        data = json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(
+            "https://www.googleapis.com/youtube/v3/commentThreads?part=snippet",
+            data=data,
+            headers={**creds.auth_header(), "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                res = json.loads(resp.read().decode("utf-8"))
+                logger.info(
+                    f"posted discussion hook comment on {video_id}: {res.get('id')}",
+                    extra={"job_id": job_id, "stage": "youtube_comment", "status": "ok"},
+                )
+        except urllib.error.HTTPError as exc:
+            # 403 (insufficientPermissions) is expected if token lacks youtube.force-ssl.
+            # Never fail upload due to optional comment posting.
+            logger.info(
+                f"comment auto-post skipped (HTTP {exc.code}); upload succeeded",
+                extra={"job_id": job_id, "stage": "youtube_comment", "status": "skipped"},
+            )
+        except Exception as exc:
+            logger.warning(
+                f"comment auto-post skipped ({exc}); upload succeeded",
+                extra={"job_id": job_id, "stage": "youtube_comment", "status": "warning"},
+            )
 
     def get_video(self, video_id: str) -> dict:
         """Fetch video metadata (statistics) by ID."""

@@ -25,7 +25,7 @@ logger = get_logger(__name__)
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
-SCOPES = "https://www.googleapis.com/auth/youtube.upload"
+SCOPES = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.force-ssl"
 
 
 @dataclass
