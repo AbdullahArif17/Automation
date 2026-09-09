@@ -353,9 +353,22 @@ def cut_segment(
             f"x='(in_w-out_w)/2':y='(in_h-out_h)/2',scale={target_w}:{target_h}"
         )
 
-    if ass_path:
+    # Subtitle and Top Hook Banner burning
+    target_ass = ass_path
+    if not target_ass:
+        hook_text = getattr(candidate, "hook_headline", "").strip() or getattr(candidate, "suggested_title", "").strip()
+        if hook_text:
+            try:
+                from app.media.captions import create_hook_only_ass
+                fallback_ass_path = str(Path(output_path).with_suffix(".hook.ass"))
+                target_ass = create_hook_only_ass(hook_text, duration, fallback_ass_path)
+            except Exception:
+                target_ass = None
+
+    if target_ass:
         burn_mode = (os.getenv("CLIP_BURN_SUBTITLES") or getattr(settings, "clip_burn_subtitles", "auto")).lower()
         should_burn = True
+        has_real_subs = False
 
         if burn_mode == "never":
             should_burn = False
@@ -366,10 +379,32 @@ def cut_segment(
             has_real_subs = detect_hardcoded_subtitles(source_path, candidate.start_seconds, candidate.duration)
             if has_real_subs:
                 should_burn = False
-                logger.info(f"Pre-existing dynamic subtitles detected in source for job {job_id}; skipping subtitle burn to avoid double subtitles")
+                logger.info(f"Pre-existing dynamic subtitles detected in source for job {job_id}; skipping dialogue subtitle burn")
 
+        active_ass = None
         if should_burn:
-            safe_ass = str(Path(ass_path).absolute()).replace("\\", "/").replace(":", "\\:")
+            active_ass = target_ass
+        elif has_real_subs:
+            # Source video already has dialogue subtitles at the bottom, but we STILL burn
+            # the viral Top Hook banner at the top for high-CTR thumbnail & first-frame retention!
+            hook_text = getattr(candidate, "hook_headline", "").strip()
+            if not hook_text and getattr(candidate, "suggested_title", ""):
+                words = [w for w in candidate.suggested_title.split() if not w.startswith("#")]
+                hook_text = " ".join(words[:4]).upper() + " 😳"
+            if not hook_text:
+                hook_text = "WAIT FOR THE END... 🤯"
+
+            try:
+                from app.media.captions import create_hook_only_ass
+                hook_ass_path = str(Path(target_ass).with_name(f"{Path(target_ass).stem}_hook_only.ass"))
+                active_ass = create_hook_only_ass(hook_text, duration, hook_ass_path)
+                logger.info(f"Burning top hook headline banner only for job {job_id}: '{hook_text}'")
+            except Exception as exc:
+                logger.warning(f"Failed to generate hook-only ASS for job {job_id}: {exc}")
+                active_ass = None
+
+        if active_ass and os.path.exists(active_ass):
+            safe_ass = str(Path(active_ass).absolute()).replace("\\", "/").replace(":", "\\:")
             crop_filter += f",subtitles='{safe_ass}'"
 
     # ffmpeg command with studio-grade settings:

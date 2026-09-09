@@ -245,7 +245,7 @@ PlayResY: 1920
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,Montserrat,84,&H0000FFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,10,0,2,120,120,480,1
 Style: Emphasis,Montserrat,90,&H0000FF00,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,10,0,2,120,120,480,1
-Style: TopHook,Montserrat,58,&H00FFFFFF,&H00FFFFFF,&H00000000,&HCC111111,-1,0,0,0,100,100,0,0,3,14,0,8,60,60,240,1
+Style: TopHook,Montserrat,64,&H00FFFFFF,&H00FFFFFF,&H00000000,&HE6121212,-1,0,0,0,100,100,0,0,3,16,0,8,60,60,210,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -345,3 +345,38 @@ def write_caption_files(
     logger.info(f"wrote captions: {list(out.keys())}",
                 extra={"stage": "captions", "status": "written"})
     return out
+
+
+def create_hook_only_ass(
+    hook_headline: str,
+    clip_duration: float,
+    output_path: str,
+) -> str:
+    """Create an ASS subtitle file containing ONLY the top hook headline banner.
+
+    Used when pre-existing subtitles are detected in the source video.
+    Allows burning the visual hook banner at the top for thumbnail/retention
+    without double-subtitling the spoken dialogue at the bottom.
+    """
+    def fmt_ass(t: float) -> str:
+        h = int(t // 3600)
+        m = int((t % 3600) // 60)
+        s = int(t % 60)
+        cs = int((t - int(t)) * 100)
+        return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+    clean_hook = (
+        hook_headline.replace("\\", "\\\\")
+        .replace("{", "\\{")
+        .replace("}", "\\}")
+        .replace("\n", " ")
+        .strip()
+    )
+
+    content = f"""{ASS_HEADER}
+Dialogue: 1,0:00:00.00,{fmt_ass(clip_duration)},TopHook,,0,0,0,,{{\\b1}}{clean_hook}{{\\b0}}
+"""
+    out_file = Path(output_path)
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    out_file.write_text(content.strip() + "\n", encoding="utf-8")
+    return str(out_file)

@@ -263,6 +263,12 @@ def generate_clip_captions(
     )
 
     hook_text = hook_headline if hook_headline is not None else getattr(clip, "hook_headline", None)
+    if not hook_text and getattr(clip, "suggested_title", None):
+        words = [w for w in clip.suggested_title.split() if not w.startswith("#")]
+        hook_text = " ".join(words[:4]).upper() + " 😳"
+    if not hook_text:
+        hook_text = "WAIT FOR THE END... 🤯"
+
     paths = write_caption_files(
         track,
         output_base,
