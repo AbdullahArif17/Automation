@@ -66,7 +66,7 @@ The most important rule: ANY VIEWER who has never seen this podcast or video bef
 {context_block}
 SOURCE VIDEO DURATION: {transcript.duration:.1f} seconds
 TARGET SHORT DURATION: {min_dur:.0f}-{max_dur:.0f} seconds (optimal: 25-45s)
-TARGET AUDIENCE: United States, Canada, and United Kingdom. Prioritize moments that grip Western audiences: hot gym girl moments, crazy fitness feats & strength shock, gymtok public reactions, savage comebacks, intense relationship/dating debates, or shocking drama.
+TARGET AUDIENCE: United States, Canada, and United Kingdom. Prioritize moments that grip Western audiences: crazy strength feats & public gym reactions (Anatoly pranks, fake beginner lifts), female fitness motivation, gym girl vs gym bro challenges, hilarious gym fails, or savage callouts.
 
 TRANSCRIPT:
 {full_text}
@@ -79,7 +79,7 @@ Return ONLY valid JSON matching this exact schema:
       "end_seconds": <float>,
       "reason": "<explain the context, who is speaking, what the core idea/punchline is, and why it works as a standalone Short>",
       "suggested_title": "<punchy curiosity hook naming person/topic, max 50 chars for mobile>",
-      "hook_headline": "<3-5 word curiosity hook in ALL CAPS with 1 emoji, e.g. 'SHE REALLY DID THAT 😳' or 'GYM BROS WERE STUNNED 💀' or 'THE AUDACITY IS INSANE 💀'>",
+      "hook_headline": "<3-5 word curiosity hook in ALL CAPS with 1 emoji, e.g. 'HE FOOLED EVERYONE 💀' or 'SHE REALLY DID THAT 😳' or 'GYM BROS IN DISBELIEF 💀'>",
       "comment_question": "<provocative or debate-sparking question related to this moment to ask viewers in the comments/description, e.g. 'Would you react like this? 👇' or 'Is this insane strength? 👇'>",
       "suggested_description": "<2 context-rich sentences explaining who is talking and what happened + high-volume search keywords + 'Subscribe for more!' + 4 specific #hashtags + #shorts>",
       "confidence": <0.0-1.0>,
@@ -96,10 +96,10 @@ STRICT QUALITY RULES:
    - The clip MUST finish at the natural end of a sentence delivering the payoff, punchline, debate conclusion, or reaction.
    - NEVER cut off mid-sentence or right before the climax.
 3. MOBILE-OPTIMIZED TITLE:
-   - Must explicitly name the person, topic, or conflict (e.g., 'Gym Girl Shocks Whole Gym' or 'Her Strength Is Unreal').
+   - Must explicitly name the person, topic, or conflict (e.g., 'Anatoly Stuns Gym Bros' or 'Gym Girl Outlifts Everyone').
    - Keep under 50 chars so the title is never cut off by '...' on mobile screens.
 4. TOP HOOK HEADLINE:
-   - Provide a punchy 3-5 word curiosity hook in ALL CAPS with 1 emoji to overlay at top of screen (e.g., 'SHE REALLY DID THAT 😳', 'GYM BROS WERE STUNNED 💀', 'WAIT FOR HIS REACTION 😭', 'THIS IS PURE SAVAGE 😈').
+   - Provide a punchy 3-5 word curiosity hook in ALL CAPS with 1 emoji to overlay at top of screen (e.g., 'HE FOOLED EVERYONE 💀', 'SHE REALLY DID THAT 😳', 'GYM BROS IN DISBELIEF 💀', 'WAIT FOR HIS REACTION 😭').
 5. STRICT DURATION BOUNDS (CRITICAL):
    - Duration MUST be between {min_dur:.0f} and {max_dur:.0f} seconds (optimal sweet spot is 25-40s for 85%+ completion rate).
    - Snippets under {min_dur:.0f}s or over {max_dur:.0f}s will be rejected.
