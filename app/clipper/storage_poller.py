@@ -343,15 +343,17 @@ def list_new_videos_youtube(
     items_to_process = []
     
     if search_query:
-        # Fetch search results targeted to US English audience
-        data = _youtube_api_request("search", {
+        # Fetch search results targeted to US English audience (filtered to 4-20m medium videos to avoid 15s Shorts)
+        search_params = {
             "part": "snippet",
             "q": search_query,
             "type": "video",
+            "videoDuration": os.getenv("CLIP_SEARCH_VIDEO_DURATION", "medium"),
             "regionCode": "US",
             "relevanceLanguage": "en",
             "maxResults": 50,
-        })
+        }
+        data = _youtube_api_request("search", search_params)
         items_to_process = data.get("items", [])
     elif channel_input:
         channel_id = _resolve_channel_id(channel_input)
