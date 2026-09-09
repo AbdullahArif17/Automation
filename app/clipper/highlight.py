@@ -66,7 +66,7 @@ The most important rule: ANY VIEWER who has never seen this podcast or video bef
 {context_block}
 SOURCE VIDEO DURATION: {transcript.duration:.1f} seconds
 TARGET SHORT DURATION: {min_dur:.0f}-{max_dur:.0f} seconds (optimal: 25-45s)
-TARGET AUDIENCE: United States, Canada, and United Kingdom. Prioritize moments that grip Western audiences: recognizable celebrities, intense relationship/dating debates, shocking confessions, savage rejections, controversial opinions, or high-stakes drama.
+TARGET AUDIENCE: United States, Canada, and United Kingdom. Prioritize moments that grip Western audiences: hot gym girl moments, crazy fitness feats & strength shock, gymtok public reactions, savage comebacks, intense relationship/dating debates, or shocking drama.
 
 TRANSCRIPT:
 {full_text}
@@ -79,8 +79,8 @@ Return ONLY valid JSON matching this exact schema:
       "end_seconds": <float>,
       "reason": "<explain the context, who is speaking, what the core idea/punchline is, and why it works as a standalone Short>",
       "suggested_title": "<punchy curiosity hook naming person/topic, max 50 chars for mobile>",
-      "hook_headline": "<3-5 word curiosity hook in ALL CAPS with 1 emoji, e.g. 'SHE REALLY SAID THIS... 😳' or 'THE DISRESPECT IS UNREAL 💀' or 'WAIT FOR HER REASON 😭'>",
-      "comment_question": "<provocative or debate-sparking question related to this moment to ask viewers in the comments/description, e.g. 'Is this an instant red flag? 👇' or 'Who was out of line here? 👇'>",
+      "hook_headline": "<3-5 word curiosity hook in ALL CAPS with 1 emoji, e.g. 'SHE REALLY DID THAT 😳' or 'GYM BROS WERE STUNNED 💀' or 'THE AUDACITY IS INSANE 💀'>",
+      "comment_question": "<provocative or debate-sparking question related to this moment to ask viewers in the comments/description, e.g. 'Would you react like this? 👇' or 'Is this insane strength? 👇'>",
       "suggested_description": "<2 context-rich sentences explaining who is talking and what happened + high-volume search keywords + 'Subscribe for more!' + 4 specific #hashtags + #shorts>",
       "confidence": <0.0-1.0>,
       "crop_mode": "<'center' or 'blur'>"
@@ -96,25 +96,24 @@ STRICT QUALITY RULES:
    - The clip MUST finish at the natural end of a sentence delivering the payoff, punchline, debate conclusion, or reaction.
    - NEVER cut off mid-sentence or right before the climax.
 3. MOBILE-OPTIMIZED TITLE:
-   - Must explicitly name the person, topic, or conflict (e.g., 'Joe Rogan on the 1994 Own Goal' or 'Ronaldo Explains Why He Left').
+   - Must explicitly name the person, topic, or conflict (e.g., 'Gym Girl Shocks Whole Gym' or 'Her Strength Is Unreal').
    - Keep under 50 chars so the title is never cut off by '...' on mobile screens.
 4. TOP HOOK HEADLINE:
-   - Provide a punchy 3-5 word curiosity hook in ALL CAPS with 1 emoji to overlay at top of screen (e.g., 'SHE REALLY SAID THIS... 😳', 'THE DISRESPECT IS UNREAL 💀', 'HE DID NOT HOLD BACK 💀', 'COULD NEVER BE ME 😭').
+   - Provide a punchy 3-5 word curiosity hook in ALL CAPS with 1 emoji to overlay at top of screen (e.g., 'SHE REALLY DID THAT 😳', 'GYM BROS WERE STUNNED 💀', 'WAIT FOR HIS REACTION 😭', 'THIS IS PURE SAVAGE 😈').
 5. STRICT DURATION BOUNDS (CRITICAL):
-   - Duration MUST be between {min_dur:.0f} and {max_dur:.0f} seconds (optimal sweet spot is 28-45s for 80%+ completion rate).
+   - Duration MUST be between {min_dur:.0f} and {max_dur:.0f} seconds (optimal sweet spot is 25-40s for 85%+ completion rate).
    - Snippets under {min_dur:.0f}s or over {max_dur:.0f}s will be rejected.
 6. CROP MODE:
    - Use 'center' for interviews, podcasts, gym, and centered subjects.
    - Use 'blur' for gaming or wide group panels where edges matter.
 7. ACCURATE CELEBRITY & SPEAKER NAMES (CRITICAL):
-   - Use the SOURCE TOPIC / CONTEXT to verify exact celebrity and speaker identities.
-   - Do NOT confuse similar actor names (e.g., Tom Holland is Spider-Man; Tom Hiddleston is Loki. Chris Evans is Captain America; Chris Hemsworth is Thor. Ryan Reynolds is Deadpool; Ryan Gosling is Barbie/Drive).
-   - If unsure of an actor's surname from transcript context, refer to their famous character or role (e.g. 'Spider-Man Actor') rather than guessing the wrong name.
+   - Use the SOURCE TOPIC / CONTEXT to verify exact celebrity, athlete, or influencer identities.
+   - Do NOT confuse similar names. If unsure of an exact surname, use a clear role or persona descriptor.
 8. ENGAGEMENT QUESTION (CRITICAL FOR COMMENTS):
-   - Provide a provocative debate question in 'comment_question' to hook viewers into fierce comment debates (e.g., 'Is this an instant dealbreaker? 👇' or 'Who was in the right? 👇').
-9. VIRAL TENSION & SPICY DYNAMICS (CRITICAL):
-   - Prioritize moments with the highest emotional tension: heated dating debates, shocking relationship confessions, savage rejections, awkward flirting, or controversial moral dilemmas.
-   - If a video contains a spicy or jaw-dropping exchange, always select it as candidate #1.
+   - Provide a provocative debate question in 'comment_question' to hook viewers into fierce comment debates (e.g., 'Would you try this lift? 👇' or 'Who was right here? 👇').
+9. VIRAL TENSION & HIGH-ENERGY MOMENTS (CRITICAL):
+   - Prioritize moments with the highest energy and emotional reaction: crazy strength feats, public gym reactions, jaw-dropping physique moments, hilarious gym fails/roasts, heated debates, or savage callouts.
+   - If a video contains a stunning, funny, or jaw-dropping exchange, always select it as candidate #1.
 10. Return 1-3 candidates, best first.
 """
 
