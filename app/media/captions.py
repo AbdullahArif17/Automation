@@ -19,6 +19,23 @@ from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Matches emoji and pictographic symbols outside standard text range
+EMOJI_PATTERN = re.compile(
+    r"[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50-\u2b55\u200d\ufe0f]",
+    flags=re.UNICODE
+)
+
+def sanitize_hook_text(text: str) -> str:
+    """Sanitize hook headline text for ASS rendering.
+    
+    Removes raw emoji that render as unreadable empty boxes ([]) in libass/FFmpeg
+    on systems lacking a color-emoji glyph fallback, while preserving clean ASCII/Latin text.
+    """
+    clean = EMOJI_PATTERN.sub("", text)
+    # Remove multiple spaces left behind by stripped emojis
+    clean = re.sub(r"\s+", " ", clean).strip()
+    return clean.upper()
+
 
 @dataclass
 class CaptionLine:
@@ -310,10 +327,18 @@ def to_ass(
             cs = int((t - int(t)) * 100)
             return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
-        clean_hook = hook_headline.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}").replace("\n", " ").strip()
-        parts.append(
-            f"Dialogue: 1,0:00:00.00,{fmt_ass(clip_duration)},TopHook,,0,0,0,,{{\\b1}}{clean_hook}{{\\b0}}"
+        clean_hook = (
+            sanitize_hook_text(hook_headline)
+            .replace("\\", "\\\\")
+            .replace("{", "\\{")
+            .replace("}", "\\}")
+            .replace("\n", " ")
+            .strip()
         )
+        if clean_hook:
+            parts.append(
+                f"Dialogue: 1,0:00:00.00,{fmt_ass(clip_duration)},TopHook,,0,0,0,,{{\\b1}}{clean_hook}{{\\b0}}"
+            )
 
     for line in track.lines:
         parts.append(_line_to_karaoke_ass(line))
@@ -366,7 +391,8 @@ def create_hook_only_ass(
         return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
     clean_hook = (
-        hook_headline.replace("\\", "\\\\")
+        sanitize_hook_text(hook_headline)
+        .replace("\\", "\\\\")
         .replace("{", "\\{")
         .replace("}", "\\}")
         .replace("\n", " ")
