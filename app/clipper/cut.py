@@ -100,7 +100,14 @@ def build_crop_filter(
         Filter string for -filter_complex
     """
     if framing_plan is not None:
-        if framing_plan.mode == "split":
+        if framing_plan.mode == "blur":
+            return (
+                f"split[bg][fg];"
+                f"[bg]scale={target_w}:{target_h}:flags=lanczos:force_original_aspect_ratio=increase,crop={target_w}:{target_h},boxblur=40[bg_blurred];"
+                f"[fg]scale={target_w}:{target_h}:flags=lanczos:force_original_aspect_ratio=decrease[fg_scaled];"
+                f"[bg_blurred][fg_scaled]overlay=(W-w)/2:(H-h)/2"
+            )
+        elif framing_plan.mode == "split":
             top_h = target_h // 2
             return (
                 f"split[vtop_in][vbot_in];"
@@ -314,13 +321,30 @@ def cut_segment(
     src_w, src_h, src_dur, src_fps = get_video_info(source_path)
     target_fps = 60 if src_fps >= 55.0 else 30
 
+    # Guarantee broadcast visual quality: reject low-res sources (<720p) that look blurry when cropped to 9:16
+    if src_h < 720:
+        raise ValueError(
+            f"Source video resolution too low ({src_w}x{src_h} < 720p). "
+            f"Skipping to ensure only high-definition source footage is clipped."
+        )
+
     # Validate timestamps
     if candidate.start_seconds < 0 or candidate.end_seconds > src_dur:
         raise ValueError(f"candidate timestamps [{candidate.start_seconds}, {candidate.end_seconds}] outside source duration {src_dur}")
 
     duration = candidate.end_seconds - candidate.start_seconds
 
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    # Check if candidate requested blur mode (e.g. for group panels/multi-person scenes)
+    candidate_crop_mode = getattr(candidate, "crop_mode", "").lower()
+    if candidate_crop_mode == "blur":
+        crop_mode = "blur"
+
+    # Check for reaction context (e.g. reactor webcam, response, watching clip)
+    # Cropping tightly into a reactor's facecam cuts off the actual video/lift/fail they are reacting to!
+    context_text = f"{Path(source_path).name} {getattr(candidate, 'suggested_title', '')} {getattr(candidate, 'reason', '')} {getattr(candidate, 'hook_headline', '')}".lower()
+    if any(k in context_text for k in ("react", "reaction", "reacts", "reacting", "watching", "response to", "breakdown")):
+        logger.info(f"Reaction context detected for job {job_id}; automatically engaging blur mode so both reactor and source content are visible")
+        crop_mode = "blur"
 
     # Perform smart AI face tracking if mode is auto/smart/face
     framing_plan = None
@@ -335,11 +359,16 @@ def cut_segment(
                 src_h=src_h,
                 target_w=target_w,
                 target_h=target_h,
+                preferred_crop_mode=crop_mode,
             )
             logger.info(f"AI framing plan determined for job {job_id}: mode={framing_plan.mode}")
         except Exception as exc:
             logger.warning(f"Face tracking analysis failed, falling back to standard crop: {exc}")
             framing_plan = None
+    elif crop_mode == "blur":
+        from app.clipper.face_tracker import FramingPlan
+        framing_plan = FramingPlan(mode="blur")
+        logger.info(f"Aesthetic blur mode engaged for job {job_id} (full group frame preserved)")
 
     # Build filter chain
     crop_filter = build_crop_filter(crop_mode, src_w, src_h, target_w, target_h, framing_plan=framing_plan)
@@ -350,7 +379,7 @@ def cut_segment(
         crop_filter += (
             f",crop=w='if(lte(t\\,2.2)\\,{target_w}/(1.07-0.07*(t/2.2))\\,{target_w})':"
             f"h='if(lte(t\\,2.2)\\,{target_h}/(1.07-0.07*(t/2.2))\\,{target_h})':"
-            f"x='(in_w-out_w)/2':y='(in_h-out_h)/2',scale={target_w}:{target_h}"
+            f"x='(in_w-out_w)/2':y='(in_h-out_h)/2',scale={target_w}:{target_h}:flags=lanczos"
         )
 
     # Subtitle and Top Hook Banner burning
@@ -424,8 +453,8 @@ def cut_segment(
         "-t", str(duration),
         "-filter_complex", crop_filter,
         "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "17",
+        "-preset", "medium",
+        "-crf", "16",
         "-pix_fmt", "yuv420p",
         "-r", str(target_fps),
         "-af", "loudnorm=I=-14:LRA=7:TP=-1.5",

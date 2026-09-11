@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from typing import Optional
 
@@ -16,6 +17,77 @@ from app.config.settings import get_settings
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def get_niche_prompt_context(topic_context: Optional[str] = None) -> tuple[str, str]:
+    """Return (audience_focus, viral_tension_criteria) tailored to the channel's niche.
+
+    Checks CLIP_NICHE_PROMPT env var first, otherwise infers from topic_context keywords.
+    """
+    custom_niche = os.getenv("CLIP_NICHE_PROMPT", "").strip()
+    if custom_niche:
+        return custom_niche, custom_niche
+
+    ctx = (topic_context or "").lower()
+
+    # Football / Soccer / CBS Golazo / Pundit Banter / Press Conferences Niche
+    if any(k in ctx for k in ("football", "soccer", "golazo", "cbs", "champions league", "premier league", "henry", "micah", "carragher", "mourinho", "keane", "goldbridge", "press conference", "overlap", "pundit", "messi", "ronaldo", "guardiola", "klopp", "neville", "rest is football", "fozcast")):
+        audience_focus = (
+            "hilarious football pundit banter (CBS Golazo Thierry Henry, Micah Richards, Jamie Carragher, Kate Abdo roasts), "
+            "savage Roy Keane debates and Gary Neville arguments (Stick to Football / The Overlap), iconic manager press conferences "
+            "(Jose Mourinho, Pep Guardiola, Jurgen Klopp), passionate fan watchalong reactions (Mark Goldbridge), or dramatic football controversies."
+        )
+        tension_criteria = (
+            "Micah Richards uncontrollable laughing fits, Thierry Henry savage roasts, Roy Keane brutal truth bombs, "
+            "Jose Mourinho iconic press conference comebacks, heated tactical arguments, or explosive fan meltdown reactions."
+        )
+        return audience_focus, tension_criteria
+
+    # Gym / Fitness Niche
+    if any(k in ctx for k in ("gym", "fitness", "anatoly", "workout", "strength", "powerlift", "lift", "bodybuild", "calisthenic")):
+        audience_focus = (
+            "crazy strength feats & public gym reactions (Anatoly pranks, fake beginner lifts), "
+            "female fitness motivation, gym girl vs gym bro challenges, hilarious gym fails, or savage fitness roasts."
+        )
+        tension_criteria = (
+            "crazy strength feats, public gym reactions, jaw-dropping physique moments, "
+            "hilarious gym fails/roasts, heated gym debates, or savage callouts."
+        )
+        return audience_focus, tension_criteria
+
+    # Streamers / Twitch / Chaos / Gaming Niche
+    if any(k in ctx for k in ("stream", "speed", "kai", "ishowspeed", "cenat", "twitch", "sidemen", "rage", "adin", "jidion", "unhinged", "balloon")):
+        audience_focus = (
+            "chaotic streamer moments, unexpected celebrity cameos, intense gaming rage, "
+            "hilarious roasts, wild confessions, or shocking unscripted reactions (Kai Cenat, IShowSpeed, xQc, Jynxzi, Sidemen)."
+        )
+        tension_criteria = (
+            "unhinged streamer screams/rage, sudden unexpected plot twists, hilarious roasts, "
+            "intense gaming reactions, or shocking unscripted interactions that make viewers burst out laughing or replay."
+        )
+        return audience_focus, tension_criteria
+
+    # Cinema / Movies / Pop Culture / Interview Banter Niche
+    if any(k in ctx for k in ("movie", "actor", "interview", "marvel", "cinema", "batman", "nolan", "scene", "character", "reynolds", "banter", "film", "holland", "murphy")):
+        audience_focus = (
+            "mind-blowing movie facts, plot holes everyone missed, unscripted movie moments, "
+            "actors breaking character, behind-the-scenes controversies, or savage interview roasts (Marvel, DC, Nolan, Tarantino, Cinema sins)."
+        )
+        tension_criteria = (
+            "brutal roasts, shocking plot hole revelations, unscripted movie secrets, "
+            "actors breaking character laughing, or awkward celebrity interview tension."
+        )
+        return audience_focus, tension_criteria
+
+    # General Broad Viral Default
+    audience_focus = (
+        "jaw-dropping moments, shocking confessions, heated debates, high-stakes arguments, "
+        "unexpected twists, and hilarious unscripted reactions that keep viewers completely captivated."
+    )
+    tension_criteria = (
+        "high-stakes arguments, shocking revelations, unexpected twists, explosive emotional reactions, and intense debates."
+    )
+    return audience_focus, tension_criteria
 
 
 @dataclass
@@ -52,6 +124,8 @@ class ClipCandidate:
 
 def build_highlight_prompt(transcript: TranscriptResult, min_dur: float, max_dur: float, topic_context: Optional[str] = None) -> str:
     """Build the prompt for Gemini/Ollama to select highlights."""
+    audience_focus, tension_criteria = get_niche_prompt_context(topic_context)
+
     # Concatenate all segments with timestamps for context
     full_text = ""
     for seg in transcript.segments:
@@ -66,7 +140,7 @@ The most important rule: ANY VIEWER who has never seen this podcast or video bef
 {context_block}
 SOURCE VIDEO DURATION: {transcript.duration:.1f} seconds
 TARGET SHORT DURATION: {min_dur:.0f}-{max_dur:.0f} seconds (optimal: 25-45s)
-TARGET AUDIENCE: United States, Canada, and United Kingdom. Prioritize moments that grip Western audiences: crazy strength feats & public gym reactions (Anatoly pranks, fake beginner lifts), female fitness motivation, gym girl vs gym bro challenges, hilarious gym fails, or savage callouts.
+TARGET AUDIENCE: United States, Canada, and United Kingdom. Prioritize moments that grip Western audiences: {audience_focus}
 
 TRANSCRIPT:
 {full_text}
@@ -103,16 +177,19 @@ STRICT QUALITY RULES:
 5. STRICT DURATION BOUNDS (CRITICAL):
    - Duration MUST be between {min_dur:.0f} and {max_dur:.0f} seconds (optimal sweet spot is 25-40s for 85%+ completion rate).
    - Snippets under {min_dur:.0f}s or over {max_dur:.0f}s will be rejected.
-6. CROP MODE:
-   - Use 'center' for interviews, podcasts, gym, and centered subjects.
-   - Use 'blur' for gaming or wide group panels where edges matter.
+6. CROP MODE (CRITICAL FOR VISIBILITY):
+   - Use 'blur' for:
+     * REACTION videos (where a creator/streamer reacts to a video, fail, workout, or clip): ALWAYS use 'blur' so viewers see BOTH the reactor's face and the actual video happening on screen! Never crop out what is being reacted to!
+     * Clips with 2, 3, or more people on screen, group panels, podcast co-hosts, or wide studio interviews (keeps all people and reactions 100% visible).
+     * Gaming, wide action, or when visual context/screen edges matter.
+   - Use 'center' ONLY when there is strictly 1 single speaker centered on screen with no external video being reacted to.
 7. ACCURATE CELEBRITY & SPEAKER NAMES (CRITICAL):
    - Use the SOURCE TOPIC / CONTEXT to verify exact celebrity, athlete, or influencer identities.
    - Do NOT confuse similar names. If unsure of an exact surname, use a clear role or persona descriptor.
 8. ENGAGEMENT QUESTION (CRITICAL FOR COMMENTS):
    - Provide a provocative debate question in 'comment_question' to hook viewers into fierce comment debates (e.g., 'Would you try this lift? 👇' or 'Who was right here? 👇').
 9. VIRAL TENSION & HIGH-ENERGY MOMENTS (CRITICAL):
-   - Prioritize moments with the highest energy and emotional reaction: crazy strength feats, public gym reactions, jaw-dropping physique moments, hilarious gym fails/roasts, heated debates, or savage callouts.
+   - Prioritize moments with the highest energy and emotional reaction: {tension_criteria}
    - If a video contains a stunning, funny, or jaw-dropping exchange, always select it as candidate #1.
 10. Return 1-3 candidates, best first.
 """

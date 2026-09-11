@@ -75,7 +75,7 @@ class ShotPlan:
 
 @dataclass
 class FramingPlan:
-    mode: str  # "single", "dynamic", "split", or "center"
+    mode: str  # "single", "dynamic", "split", "blur", or "center"
     has_subtitles: bool = False  # True if source video already has hardcoded subtitles
     # For single / dynamic mode:
     crop_x: int = 0
@@ -187,15 +187,21 @@ def analyze_clip_framing(
     target_w: int = 1080,
     target_h: int = 1920,
     sample_interval: float = 0.5,
+    preferred_crop_mode: Optional[str] = None,
 ) -> FramingPlan:
     """Analyze video frames across the clip segment to determine optimal 9:16 framing.
 
     Supports:
-    1. Dynamic Multi-Shot AI Editing: cuts/pans between speakers on camera angle changes.
-    2. Side-by-Side Split Screen: stacks 2 distinct speakers (top & bottom) for wide podcast frames.
-    3. Single Speaker Tracking: centers on primary speaker.
-    4. Center Crop Fallback: for non-face / B-roll footage.
+    1. Aesthetic Blur Mode: for panels, 3+ people, or wide multi-person scenes to keep all subjects visible.
+    2. Dynamic Multi-Shot AI Editing: cuts/pans between speakers on camera angle changes.
+    3. Side-by-Side Split Screen: stacks 2 distinct speakers (top & bottom) for wide podcast frames.
+    4. Single Speaker Tracking: centers on primary speaker.
+    5. Center Crop Fallback: for non-face / B-roll footage.
     """
+    if preferred_crop_mode == "blur":
+        logger.info("Preferred crop mode is 'blur'; using aesthetic blurred background letterbox")
+        return _make_blur_plan()
+
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         logger.warning(f"Could not open {video_path} for face analysis, using center crop")
@@ -208,6 +214,7 @@ def analyze_clip_framing(
     class _FrameSample:
         time: float
         faces: list[int]
+        face_boxes: list[tuple[int, int, int, int]]
         thumb: np.ndarray
 
     samples: list[_FrameSample] = []
@@ -246,9 +253,14 @@ def analyze_clip_framing(
 
         detected = detector.detect(small_frame)
         frame_centers = []
+        frame_boxes = []
         for face in detected:
             orig_cx = int(face.center_x / scale)
+            orig_cy = int(face.center_y / scale)
+            orig_w = int(face.w / scale)
+            orig_h = int(face.h / scale)
             frame_centers.append(orig_cx)
+            frame_boxes.append((orig_cx, orig_cy, orig_w, orig_h))
 
         # Scene change / camera cut detection:
         # Downscale grayscale to (160, 90) for fast difference check
@@ -264,7 +276,7 @@ def analyze_clip_framing(
                 last_cut = current_time
 
         prev_thumb = thumb
-        samples.append(_FrameSample(time=current_time, faces=sorted(frame_centers), thumb=thumb))
+        samples.append(_FrameSample(time=current_time, faces=sorted(frame_centers), face_boxes=frame_boxes, thumb=thumb))
         current_time += sample_interval
 
     cap.release()
@@ -274,15 +286,32 @@ def analyze_clip_framing(
         logger.info("No faces detected in clip; falling back to center crop")
         return _make_center_plan(src_w, src_h, target_w, target_h)
 
-    # 1. Check for consistent 2-person podcast wide format across the clip
-    two_face_frames = [f for f in all_face_centers if len(f) >= 2 and (f[-1] - f[0]) > (src_w * 0.25)]
-    if len(two_face_frames) >= max(3, int(len(all_face_centers) * 0.35)):
-        left_speakers = [f[0] for f in two_face_frames]
-        right_speakers = [f[-1] for f in two_face_frames]
-        median_left = int(np.median(left_speakers))
-        median_right = int(np.median(right_speakers))
-        logger.info(f"Detected 2 distinct speakers (left={median_left}, right={median_right}); generating podcast split-screen")
-        return _make_split_screen_plan(src_w, src_h, median_left, median_right, target_w, target_h)
+    # Check for corner webcam / reaction video layout (PiP):
+    # In reaction videos, a small webcam of the reactor is pinned in a corner while the main video plays.
+    # Cropping tightly into the corner webcam hides what they are reacting to!
+    corner_webcam_hits = 0
+    for s in samples:
+        for cx, cy, w, h in s.face_boxes:
+            if (cx < src_w * 0.35 or cx > src_w * 0.65) and (cy < src_h * 0.38 or cy > src_h * 0.62) and w < (src_w * 0.30):
+                corner_webcam_hits += 1
+                break
+    if corner_webcam_hits >= max(2, int(len(samples) * 0.18)):
+        logger.info(
+            f"Detected corner webcam / reaction video layout ({corner_webcam_hits}/{len(samples)} frames); "
+            f"automatically using aesthetic blur mode so both the reactor and the content are 100% visible"
+        )
+        return _make_blur_plan()
+
+    # 1. Check for 2 or more people in frame (Interviews, 2-person podcasts, panels, reactions, challenges)
+    # Whenever 2 or more faces appear, vertical 9:16 cropping cuts off one person or their reaction.
+    # We use aesthetic blur mode to keep both speakers and their interactions 100% visible side by side!
+    multi_face_frames = [f for f in all_face_centers if len(f) >= 2]
+    if len(multi_face_frames) >= max(2, int(len(all_face_centers) * 0.15)):
+        logger.info(
+            f"Detected 2+ people in frame ({len(multi_face_frames)}/{len(all_face_centers)} frames with 2+ faces); "
+            f"automatically engaging aesthetic blur mode to keep all subjects and reactions 100% visible"
+        )
+        return _make_blur_plan()
 
     # 2. Dynamic Scene-Aware Framing: analyze camera shots
     cut_timestamps.append(end_time)
@@ -347,6 +376,10 @@ def analyze_clip_framing(
     median_x = int(np.median(primary_centers))
     logger.info(f"Detected single primary speaker at x={median_x}; generating centered smart track")
     return _make_single_plan(src_w, src_h, median_x, target_w, target_h)
+
+
+def _make_blur_plan() -> FramingPlan:
+    return FramingPlan(mode="blur")
 
 
 def _make_center_plan(src_w: int, src_h: int, target_w: int, target_h: int) -> FramingPlan:

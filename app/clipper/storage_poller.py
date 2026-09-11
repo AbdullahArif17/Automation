@@ -54,6 +54,7 @@ def _get_yt_dlp_common_args() -> list[str]:
     args = [
         "--js-runtimes", "deno",
         "--remote-components", "ejs:github",
+        "--extractor-args", "youtube:player_client=web,tv,web_safari",
     ]
     if _has_ipv6():
         args.append("--force-ipv6")
@@ -181,6 +182,8 @@ class SourceVideo:
     # YouTube-specific
     yt_video_id: str = ""
     yt_channel_id: str = ""
+    views: int = 0
+    trending_score: float = 0.0
 
 
 def _get_s3_client():
@@ -344,15 +347,28 @@ def list_new_videos_youtube(
     
     if search_query:
         # Fetch search results targeted to US English audience (filtered to 4-20m medium videos to avoid 15s Shorts)
+        search_order = os.getenv("CLIP_SEARCH_ORDER", "viewCount")
         search_params = {
             "part": "snippet",
             "q": search_query,
             "type": "video",
+            "order": search_order,
             "videoDuration": os.getenv("CLIP_SEARCH_VIDEO_DURATION", "medium"),
             "regionCode": "US",
             "relevanceLanguage": "en",
             "maxResults": 50,
         }
+        published_days = os.getenv("CLIP_SEARCH_PUBLISHED_AFTER_DAYS")
+        if published_days:
+            try:
+                days_int = int(published_days)
+                if days_int > 0:
+                    from datetime import datetime, timezone, timedelta
+                    published_after = (datetime.now(timezone.utc) - timedelta(days=days_int)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    search_params["publishedAfter"] = published_after
+            except (ValueError, TypeError):
+                pass
+
         data = _youtube_api_request("search", search_params)
         items_to_process = data.get("items", [])
     elif channel_input:
@@ -370,31 +386,51 @@ def list_new_videos_youtube(
     else:
         raise RuntimeError("Must provide either channel_input or search_query")
 
-    new_videos: list[SourceVideo] = []
+    # Step 1: Collect unique, un-processed video IDs
+    candidate_ids: list[str] = []
     for item in items_to_process:
-        snippet = item.get("snippet", {})
-        
-        # Depending on if it's from search or playlistItems, videoId is in different places
         if search_query:
-            yt_video_id = item.get("id", {}).get("videoId", "")
+            yt_vid = item.get("id", {}).get("videoId", "")
         else:
-            yt_video_id = item.get("contentDetails", {}).get("videoId", "")
+            yt_vid = item.get("contentDetails", {}).get("videoId", "")
+        if yt_vid and yt_vid not in processed and yt_vid not in candidate_ids:
+            candidate_ids.append(yt_vid)
 
-        if not yt_video_id or yt_video_id in processed:
+    if not candidate_ids:
+        return []
+
+    # Step 2: Batch fetch video metadata & statistics in chunks of 50 (50x faster, saves API quota)
+    vitems_by_id: dict[str, dict] = {}
+    for i in range(0, len(candidate_ids), 50):
+        chunk = candidate_ids[i:i + 50]
+        try:
+            vdata = _youtube_api_request("videos", {
+                "part": "contentDetails,snippet,statistics",
+                "id": ",".join(chunk),
+                "maxResults": 50,
+            })
+            for v in vdata.get("items", []):
+                vitems_by_id[v["id"]] = v
+        except Exception as exc:
+            logger.warning(f"Failed to batch fetch video metadata for {len(chunk)} IDs: {exc}")
+
+    # Step 3: Parse, validate duration, and compute Trending Velocity Score
+    import re
+    from datetime import datetime, timezone
+    now_utc = datetime.now(timezone.utc)
+
+    min_src_dur = int(os.getenv("CLIP_SOURCE_MIN_DURATION", "120"))
+    max_src_dur = int(os.getenv("CLIP_SOURCE_MAX_DURATION", "5400"))
+    min_views = int(os.getenv("CLIP_MIN_SOURCE_VIEWS", "5000"))
+
+    scored_candidates: list[tuple[float, SourceVideo]] = []
+
+    for yt_video_id in candidate_ids:
+        v = vitems_by_id.get(yt_video_id)
+        if not v:
             continue
 
-        # Get video details to check duration and view statistics (filter out Shorts < 60s and dead videos)
-        vdata = _youtube_api_request("videos", {
-            "part": "contentDetails,snippet,statistics",
-            "id": yt_video_id,
-        })
-        vitems = vdata.get("items", [])
-        if not vitems:
-            continue
-        v = vitems[0]
-        duration_iso = v["contentDetails"].get("duration", "PT0S")
-        # Parse ISO 8601 duration (e.g., PT15M33S -> 933s, P1DT2H -> 93600s)
-        import re
+        duration_iso = v.get("contentDetails", {}).get("duration", "PT0S")
         dur_match = re.match(r"^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$", duration_iso)
         if not dur_match:
             h_match = re.search(r"(\d+)H", duration_iso)
@@ -402,7 +438,6 @@ def list_new_videos_youtube(
             s_match = re.search(r"(\d+)S", duration_iso)
             d_match = re.search(r"(\d+)D", duration_iso)
             if not any([h_match, m_match, s_match, d_match]):
-                logger.info(f"Skipping video with unparseable or zero duration '{duration_iso}': {v.get('snippet', {}).get('title')}")
                 continue
             days = int(d_match.group(1)) if d_match else 0
             hours = int(h_match.group(1)) if h_match else 0
@@ -416,33 +451,63 @@ def list_new_videos_youtube(
             seconds = int(dur_match.group(4) or 0)
             duration_secs = days * 86400 + hours * 3600 + minutes * 60 + seconds
 
-        title = v["snippet"].get("title", "Untitled")
+        title = v.get("snippet", {}).get("title", "Untitled")
         title_lower = title.lower()
 
-        # Configurable source video duration (default 2m to 90m to cover full podcasts)
-        min_src_dur = int(os.getenv("CLIP_SOURCE_MIN_DURATION", "120"))
-        max_src_dur = int(os.getenv("CLIP_SOURCE_MAX_DURATION", "5400"))
         if duration_secs < min_src_dur or duration_secs > max_src_dur or "#shorts" in title_lower or "#short" in title_lower or "#tiktok" in title_lower:
-            logger.info(f"Skipping video outside {min_src_dur//60}m-{max_src_dur//60}m range ({duration_secs}s): {title}")
             continue
 
-        # Filter out dead videos with low view counts (ensures source content is proven)
-        min_views = int(os.getenv("CLIP_MIN_SOURCE_VIEWS", "5000"))
-        views = int(v.get("statistics", {}).get("viewCount", 0))
+        stats = v.get("statistics", {})
+        views = int(stats.get("viewCount", 0))
         if min_views > 0 and views < min_views:
-            logger.info(f"Skipping low-view video ({views} < {min_views} views): {title}")
             continue
-        new_videos.append(SourceVideo(
-            source_type="youtube",
-            video_id=yt_video_id,
-            title=title,
-            size_bytes=0,  # unknown until download
-            etag=yt_video_id,  # use video ID as de-dup key
-            yt_video_id=yt_video_id,
-            yt_channel_id=v["snippet"].get("channelId", ""),
+
+        likes = int(stats.get("likeCount", 0))
+        comments = int(stats.get("commentCount", 0))
+
+        # Calculate publication age in days
+        published_at_str = v.get("snippet", {}).get("publishedAt", "")
+        age_days = 30.0
+        if published_at_str:
+            try:
+                pub_dt = datetime.fromisoformat(published_at_str.replace("Z", "+00:00"))
+                age_days = max(0.05, (now_utc - pub_dt).total_seconds() / 86400.0)
+            except Exception:
+                pass
+
+        # Velocity: views gained per day
+        velocity = views / age_days
+        # Engagement rate: (likes + comments) / views
+        engagement_rate = (likes + comments) / max(1.0, views)
+        # Trending Momentum Score: balances explosive daily velocity with total proven view volume
+        trending_score = (velocity ** 0.7) * (views ** 0.3) * (1.0 + min(5.0, engagement_rate * 20.0))
+
+        scored_candidates.append((
+            trending_score,
+            SourceVideo(
+                source_type="youtube",
+                video_id=yt_video_id,
+                title=title,
+                size_bytes=0,
+                etag=yt_video_id,
+                yt_video_id=yt_video_id,
+                yt_channel_id=v.get("snippet", {}).get("channelId", ""),
+                views=views,
+                trending_score=trending_score,
+            )
         ))
-        if len(new_videos) >= max_videos:
-            break
+
+    # Sort all candidates so the #1 hottest, highest-velocity trending video is at index 0!
+    scored_candidates.sort(key=lambda x: x[0], reverse=True)
+    new_videos = [sv for _, sv in scored_candidates[:max_videos]]
+
+    if new_videos:
+        top = new_videos[0]
+        logger.info(
+            f"Hottest Trending Candidate: '{top.title}' (ID: {top.yt_video_id}, "
+            f"Views: {top.views:,}, Trending Score: {top.trending_score:.1f}, "
+            f"Pool Size: {len(scored_candidates)})"
+        )
 
     return new_videos
 
@@ -493,10 +558,10 @@ def download_video_youtube(source: SourceVideo, dest_dir: Path) -> Path:
         "yt-dlp",
         *common_args,
         "-f", (
-            "bestvideo[height<=1080][fps<=30][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/"
-            "bestvideo[height<=1080][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/"
-            "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/"
-            "bestvideo[height<=1080]+bestaudio/best"
+            "bestvideo[height<=2160]+bestaudio/best[height<=2160]/"
+            "bestvideo[height>=1080]+bestaudio/best[height>=1080]/"
+            "bestvideo[height>=720]+bestaudio/best[height>=720]/"
+            "bestvideo+bestaudio/best"
         ),
         "--concurrent-fragments", "4",
         "--merge-output-format", "mp4",
