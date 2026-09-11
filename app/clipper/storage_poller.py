@@ -457,6 +457,18 @@ def list_new_videos_youtube(
         if duration_secs < min_src_dur or duration_secs > max_src_dur or "#shorts" in title_lower or "#short" in title_lower or "#tiktok" in title_lower:
             continue
 
+        # Content ID / Copyright Safeguard: Blacklist TV broadcast networks with automated global blocks
+        channel_title = v.get("snippet", {}).get("channelTitle", "")
+        ch_lower = channel_title.lower()
+        blacklisted_broadcasters = (
+            "sky sports", "skysports", "tnt sports", "tntsports", "bt sport", "btsport",
+            "match of the day", "motd", "bbc sport", "premier league", "uefa", "bein sports",
+            "beinsports", "dazn", "super sunday", "monday night football", "optus sport"
+        )
+        if any(b in ch_lower for b in blacklisted_broadcasters) or any(b in title_lower for b in blacklisted_broadcasters):
+            logger.info(f"Skipping video from blacklisted TV broadcaster / show ('{channel_title}'): {title}")
+            continue
+
         stats = v.get("statistics", {})
         views = int(stats.get("viewCount", 0))
         if min_views > 0 and views < min_views:
