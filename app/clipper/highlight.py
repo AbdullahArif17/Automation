@@ -55,15 +55,16 @@ def get_niche_prompt_context(topic_context: Optional[str] = None) -> tuple[str, 
         )
         return audience_focus, tension_criteria
 
-    # Streamers / Twitch / Chaos / Gaming Niche
-    if any(k in ctx for k in ("stream", "speed", "kai", "ishowspeed", "cenat", "twitch", "sidemen", "rage", "adin", "jidion", "unhinged", "balloon")):
+    # Viral Internet Drama / Pop The Balloon / Druski / Streamers / Unhinged Chaos Niche
+    if any(k in ctx for k in ("stream", "speed", "kai", "ishowspeed", "cenat", "twitch", "sidemen", "rage", "adin", "jidion", "unhinged", "balloon", "druski", "jubilee", "beta squad", "rejection", "roast", "humbled", "courtroom", "audition", "drama")):
         audience_focus = (
-            "chaotic streamer moments, unexpected celebrity cameos, intense gaming rage, "
-            "hilarious roasts, wild confessions, or shocking unscripted reactions (Kai Cenat, IShowSpeed, xQc, Jynxzi, Sidemen)."
+            "high-voltage viral internet drama: brutal Pop The Balloon rejections & ego checks, hilarious Druski Coulda Been Records auditions & roasts, "
+            "heated Jubilee & podcast arguments, savage Beta Squad / Sidemen roasts, unhinged streamer desk slams & rage moments "
+            "(IShowSpeed, Kai Cenat, Jynxzi, CaseOh), or savage moments where someone gets instantly humbled."
         )
         tension_criteria = (
-            "unhinged streamer screams/rage, sudden unexpected plot twists, hilarious roasts, "
-            "intense gaming reactions, or shocking unscripted interactions that make viewers burst out laughing or replay."
+            "brutal savage rejections, jaw-dropping roasts or insults, extreme awkward tension, unhinged desk slam screams, "
+            "instant regret moments when an ego gets obliterated, or explosive argument clashes that force viewers to argue in the comments."
         )
         return audience_focus, tension_criteria
 
@@ -153,8 +154,8 @@ Return ONLY valid JSON matching this exact schema:
       "end_seconds": <float>,
       "reason": "<explain the context, who is speaking, what the core idea/punchline is, and why it works as a standalone Short>",
       "suggested_title": "<punchy curiosity hook naming person/topic, max 50 chars for mobile>",
-      "hook_headline": "<3-5 word curiosity hook in ALL CAPS with 1 emoji, e.g. 'HE FOOLED EVERYONE 💀' or 'SHE REALLY DID THAT 😳' or 'GYM BROS IN DISBELIEF 💀'>",
-      "comment_question": "<provocative or debate-sparking question related to this moment to ask viewers in the comments/description, e.g. 'Would you react like this? 👇' or 'Is this insane strength? 👇'>",
+      "hook_headline": "<3-5 word curiosity hook in ALL CAPS with 1 emoji, e.g. 'HE FOOLED EVERYONE 💀' or 'SHE TOOK HIS SOUL 😭' or 'HE GOT HUMBLED REAL QUICK 💀' or 'DRUSKI WAS IN TEARS 😭'>",
+      "comment_question": "<provocative or debate-sparking question related to this moment to ask viewers in the comments/description, e.g. 'Did she take it too far? 👇' or 'Who took the bigger L? 👇' or 'Would you react like this? 👇'>",
       "suggested_description": "<2 context-rich sentences explaining who is talking and what happened + high-volume search keywords + 'Subscribe for more!' + 4 specific #hashtags + #shorts>",
       "confidence": <0.0-1.0>,
       "crop_mode": "<'center' or 'blur'>"
@@ -170,10 +171,10 @@ STRICT QUALITY RULES:
    - The clip MUST finish at the natural end of a sentence delivering the payoff, punchline, debate conclusion, or reaction.
    - NEVER cut off mid-sentence or right before the climax.
 3. MOBILE-OPTIMIZED TITLE:
-   - Must explicitly name the person, topic, or conflict (e.g., 'Anatoly Stuns Gym Bros' or 'Gym Girl Outlifts Everyone').
+   - Must explicitly name the person, topic, or conflict (e.g., 'Anatoly Stuns Gym Bros' or 'Pop The Balloon Savage Rejection').
    - Keep under 50 chars so the title is never cut off by '...' on mobile screens.
 4. TOP HOOK HEADLINE:
-   - Provide a punchy 3-5 word curiosity hook in ALL CAPS with 1 emoji to overlay at top of screen (e.g., 'HE FOOLED EVERYONE 💀', 'SHE REALLY DID THAT 😳', 'GYM BROS IN DISBELIEF 💀', 'WAIT FOR HIS REACTION 😭').
+   - Provide a punchy 3-5 word curiosity hook in ALL CAPS with 1 emoji to overlay at top of screen (e.g., 'SHE TOOK HIS SOUL 😭', 'HE GOT HUMBLED REAL QUICK 💀', 'DRUSKI COULD NOT BELIEVE IT 💀', 'WHO WAS IN THE WRONG? 😳').
 5. STRICT DURATION BOUNDS (CRITICAL):
    - Duration MUST be between {min_dur:.0f} and {max_dur:.0f} seconds (optimal sweet spot is 25-40s for 85%+ completion rate).
    - Snippets under {min_dur:.0f}s or over {max_dur:.0f}s will be rejected.
