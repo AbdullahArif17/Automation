@@ -638,6 +638,7 @@ def test_cut_segment_subtitle_burn_modes():
 
     with patch("app.clipper.cut.check_ffmpeg", return_value=True), \
          patch("app.clipper.cut.get_video_info", return_value=(1920, 1080, 60.0, 30.0)), \
+         patch("app.clipper.cut.os.path.exists", return_value=True), \
          patch("app.clipper.cut.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
 
@@ -661,7 +662,8 @@ def test_cut_segment_subtitle_burn_modes():
             cut_segment("dummy.mp4", cand, "out.mp4", ass_path="subs.ass")
             args = mock_run.call_args[0][0]
             f = args[args.index("-filter_complex") + 1]
-            assert "subtitles=" not in f
+            assert "subs.ass" not in f
+            assert "hook_only.ass" in f
 
         # 4. CLIP_BURN_SUBTITLES=auto without pre-existing subtitles -> burn subs
         with patch.dict("os.environ", {"CLIP_BURN_SUBTITLES": "auto"}), \
@@ -681,7 +683,7 @@ def test_top_hook_overlay_banner_in_ass():
     ])
     ass_text = to_ass(track, hook_headline="WAIT FOR THE END 😳", clip_duration=35.5)
     assert "Style: TopHook" in ass_text
-    assert "TopHook,,0,0,0,,{\\b1}WAIT FOR THE END 😳{\\b0}" in ass_text
+    assert "TopHook,,0,0,0,,{\\b1}WAIT FOR THE END{\\b0}" in ass_text
     assert "0:00:35.50" in ass_text
 
 
@@ -763,19 +765,22 @@ def test_storage_poller_dedup_window(tmp_path):
             {"id": {"videoId": "brand_new_vid"}},
         ]
     }
-    mock_video_details = {
-        "items": [{
-            "contentDetails": {"duration": "PT5M00S"},
-            "snippet": {"title": "Test Video Title"},
-            "statistics": {"viewCount": "50000"},
-        }]
-    }
-
     def fake_yt_api(endpoint, params):
         if endpoint == "search":
             return mock_search_results
         elif endpoint == "videos":
-            return mock_video_details
+            req_ids = [vid for vid in params.get("id", "").split(",") if vid]
+            return {
+                "items": [
+                    {
+                        "id": vid,
+                        "contentDetails": {"duration": "PT5M00S"},
+                        "snippet": {"title": f"Test Video {vid}"},
+                        "statistics": {"viewCount": "50000"},
+                    }
+                    for vid in req_ids
+                ]
+            }
         return {}
 
     with patch("app.clipper.storage_poller._youtube_api_request", side_effect=fake_yt_api):

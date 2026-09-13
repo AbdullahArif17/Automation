@@ -180,6 +180,8 @@ class Database:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(str(self.db_path))
         self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA journal_mode = WAL")
+        self.conn.execute("PRAGMA busy_timeout = 5000")
         self.conn.execute("PRAGMA foreign_keys = ON")
         self._init_schema()
         logger.info(f"database ready at {self.db_path}",
@@ -187,6 +189,11 @@ class Database:
 
     def _init_schema(self) -> None:
         self.conn.executescript(SCHEMA)
+        # Add performance indexes for rapid lookups and deduplication
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_videos_yt_id ON videos(youtube_video_id)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_videos_source_etag ON videos(source_etag)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_videos_created ON videos(created_at)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_state ON publishing_jobs(state)")
         self.conn.commit()
         self._migrate_schema()
 

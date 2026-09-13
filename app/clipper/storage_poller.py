@@ -14,12 +14,14 @@ import hashlib
 import json
 import subprocess
 import urllib.request
+import urllib.error
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 from app.storage.database import Database
 from app.utils.logging import get_logger
+from app.utils.retry import retry
 
 logger = get_logger(__name__)
 
@@ -207,7 +209,7 @@ def _get_youtube_api_key() -> Optional[str]:
 
 
 def _youtube_api_request(path: str, params: dict) -> dict:
-    """Make a YouTube Data API v3 request."""
+    """Make a YouTube Data API v3 request with automatic retries for transient failures."""
     key = _get_youtube_api_key()
     if not key:
         raise RuntimeError("YOUTUBE_API_KEY not set")
@@ -216,9 +218,12 @@ def _youtube_api_request(path: str, params: dict) -> dict:
     query = "&".join(f"{k}={urllib.parse.quote(str(v))}" for k, v in params.items())
     url = f"{base}{path}?key={key}&{query}"
 
-    req = urllib.request.Request(url, headers={"Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.loads(resp.read().decode())
+    def _fetch():
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode())
+
+    return retry(_fetch, max_attempts=3, delay=1.5, retry_on=(urllib.error.URLError, TimeoutError))
 
 
 def _is_video_file(key: str) -> bool:
@@ -410,7 +415,9 @@ def list_new_videos_youtube(
                 "maxResults": 50,
             })
             for v in vdata.get("items", []):
-                vitems_by_id[v["id"]] = v
+                vid = v.get("id") if isinstance(v, dict) else None
+                if vid:
+                    vitems_by_id[vid] = v
         except Exception as exc:
             logger.warning(f"Failed to batch fetch video metadata for {len(chunk)} IDs: {exc}")
 
@@ -467,6 +474,11 @@ def list_new_videos_youtube(
         )
         if any(b in ch_lower for b in blacklisted_broadcasters) or any(b in title_lower for b in blacklisted_broadcasters):
             logger.info(f"Skipping video from blacklisted TV broadcaster / show ('{channel_title}'): {title}")
+            continue
+
+        # Safeguard: Filter out foreign script / non-English videos (Cyrillic, Arabic, Chinese, Japanese, Korean)
+        if re.search(r"[\u0400-\u04FF\u0600-\u06FF\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]", title):
+            logger.info(f"Skipping foreign language/script video: {title}")
             continue
 
         stats = v.get("statistics", {})
