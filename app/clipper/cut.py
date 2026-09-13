@@ -6,6 +6,7 @@ configurable crop mode for 9:16 conversion.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -167,20 +168,20 @@ def detect_hardcoded_subtitles(
     video_path: str,
     start_time: float,
     duration: float,
-    max_samples: int = 10,
+    max_samples: int = 12,
+    expected_text: Optional[str] = None,
 ) -> bool:
-    """Detect if a video has real dynamic burned-in subtitles.
+    """Robustly detect if a video segment has pre-existing burned-in subtitles.
 
-    Distinguishes actual changing subtitle text from static objects
-    (laptops, desks, logos, podiums) and camera motion using temporal
-    variance with background stability compensation:
-    - Subtitles appear, change words, and disappear as speech progresses against a stable background.
-    - Laptops, desks, and logos remain in the exact same position with static pixels.
-    - Rapid camera panning/action is filtered out via upper-background difference checking.
+    Combines OCR transcript cross-matching (when pytesseract is available)
+    with multi-color CV word-cluster morphology. Accurately distinguishes real
+    dialogue subtitles (white, yellow, boxed) from static TV watermarks, laptops,
+    desks, and temporary lower-third banners.
     """
     try:
         import cv2
         import numpy as np
+        import re
 
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -189,21 +190,48 @@ def detect_hardcoded_subtitles(
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 720
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 1280
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        video_dur = total_frames / fps if total_frames > 0 else (start_time + duration)
 
-        # Subtitle region: lower third (55% to 92% of height, 10% to 90% of width)
-        y1, y2 = int(h * 0.55), int(h * 0.92)
-        x1, x2 = int(w * 0.10), int(w * 0.90)
+        # Determine subtitle zone based on aspect ratio
+        is_vertical = (w / h) < 1.1
+        if is_vertical:
+            # Vertical (9:16) - subtitles often in middle-lower area
+            y1, y2 = int(h * 0.40), int(h * 0.88)
+            x1, x2 = int(w * 0.06), int(w * 0.94)
+        else:
+            # Widescreen (16:9 / 4:3) - subtitles in lower 42%
+            y1, y2 = int(h * 0.55), int(h * 0.94)
+            x1, x2 = int(w * 0.06), int(w * 0.94)
 
-        # Background stability reference zone: upper third (5% to 45% vertical)
-        bg_y1, bg_y2 = int(h * 0.05), int(h * 0.45)
+        scale_factor = h / 720.0
+
+        # Build set of expected spoken words (excluding common short stopwords)
+        key_tokens = set()
+        if expected_text:
+            spoken_tokens = set(re.findall(r'[a-zA-Z]{3,}', expected_text.lower()))
+            stopwords = {"the", "and", "that", "this", "with", "for", "you", "was", "are", "have", "had"}
+            key_tokens = spoken_tokens - stopwords
+
+        # Try importing pytesseract for high-precision OCR matching
+        has_ocr = False
+        try:
+            import pytesseract
+            has_ocr = True
+        except (ImportError, Exception):
+            has_ocr = False
+
+        # Evenly sample frames across candidate segment
+        eff_dur = min(duration, max(1.0, video_dur - start_time))
+        num_samples = min(max_samples, max(4, int(eff_dur * 1.5)))
+        sample_interval = max(0.4, (eff_dur - 0.8) / float(max(num_samples, 1)))
+        t = start_time + 0.4
+        end_t = start_time + eff_dur - 0.3
 
         samples = []
-        sample_interval = max(0.8, duration / 10.0)
-        t = start_time + 0.5
-        end_t = start_time + duration - 0.5
-        samples_taken = 0
+        ocr_matches = []
 
-        while t < end_t and samples_taken < max_samples:
+        while t < end_t and len(samples) < max_samples:
             frame_idx = int(t * fps)
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
             ret, frame = cap.read()
@@ -211,76 +239,128 @@ def detect_hardcoded_subtitles(
                 t += sample_interval
                 continue
 
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            bg_roi = gray[bg_y1:bg_y2, x1:x2]
-            sub_roi = gray[y1:y2, x1:x2]
+            sub_frame = frame[y1:y2, x1:x2]
+            gray_sub = cv2.cvtColor(sub_frame, cv2.COLOR_BGR2GRAY)
 
-            # Subtitles have high brightness (white > 195 or yellow) + high gradient (dark outlines)
-            _, bright = cv2.threshold(sub_roi, 195, 255, cv2.THRESH_BINARY)
-            grad = cv2.morphologyEx(sub_roi, cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8))
-            _, edges = cv2.threshold(grad, 30, 255, cv2.THRESH_BINARY)
+            # --- Strategy 1: OCR Text Extraction (if available) ---
+            if has_ocr:
+                try:
+                    _, ocr_thresh = cv2.threshold(gray_sub, 180, 255, cv2.THRESH_BINARY)
+                    raw_ocr = pytesseract.image_to_string(ocr_thresh, config='--psm 6').lower()
+                    if not raw_ocr or len(raw_ocr.strip()) < 3:
+                        raw_ocr = pytesseract.image_to_string(gray_sub, config='--psm 6').lower()
 
-            raw_text = cv2.bitwise_and(bright, edges)
+                    ocr_tokens = set(re.findall(r'[a-zA-Z]{3,}', raw_ocr))
+                    if key_tokens:
+                        matched = ocr_tokens.intersection(key_tokens)
+                        if matched:
+                            ocr_matches.append((t, matched))
+                    else:
+                        if len(ocr_tokens) >= 2:
+                            ocr_matches.append((t, ocr_tokens))
+                except Exception:
+                    pass
 
-            # Filter small noise: must have at least 80 active text pixels
-            active_pixels = int(np.sum(raw_text > 0))
-            text_mask = raw_text if active_pixels >= 80 else None
+            # --- Strategy 2: Multi-Color CV Word-Cluster Analysis ---
+            # 1. White text with sharp stroke/edges
+            _, white_bright = cv2.threshold(gray_sub, 190, 255, cv2.THRESH_BINARY)
+            grad = cv2.morphologyEx(gray_sub, cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8))
+            _, edges = cv2.threshold(grad, 25, 255, cv2.THRESH_BINARY)
+            white_text = cv2.bitwise_and(white_bright, edges)
+
+            # 2. Yellow text (common in viral clips/podcasts)
+            hsv_sub = cv2.cvtColor(sub_frame, cv2.COLOR_BGR2HSV)
+            yellow_mask = cv2.inRange(hsv_sub, np.array([18, 65, 130]), np.array([38, 255, 255]))
+            yellow_text = cv2.bitwise_and(yellow_mask, edges)
+
+            # Combined candidate text pixels
+            combined = cv2.bitwise_or(white_text, yellow_text)
+
+            # 3. Morphological close along horizontal axis to group letters into words
+            close_w = max(5, int(8 * scale_factor))
+            close_h = max(2, int(3 * scale_factor))
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (close_w, close_h))
+            connected = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel)
+
+            # 4. Connected components analysis to filter word-like shapes
+            num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(connected)
+
+            min_h = max(6, int(8 * scale_factor))
+            max_h = max(30, int(70 * scale_factor))
+            min_w = max(8, int(10 * scale_factor))
+            max_w = max(100, int(380 * scale_factor))
+            min_area = max(25, int(45 * (scale_factor ** 2)))
+
+            word_clusters = 0
+            text_pixel_count = 0
+            for s in stats[1:]:
+                cw = s[cv2.CC_STAT_WIDTH]
+                ch = s[cv2.CC_STAT_HEIGHT]
+                area = s[cv2.CC_STAT_AREA]
+                if min_h <= ch <= max_h and min_w <= cw <= max_w and area >= min_area:
+                    word_clusters += 1
+                    text_pixel_count += area
 
             samples.append({
                 "t": t,
-                "bg": bg_roi,
-                "mask": text_mask,
-                "active_pixels": active_pixels,
+                "words": word_clusters,
+                "text_pixels": text_pixel_count,
+                "mask": connected,
             })
-
-            samples_taken += 1
             t += sample_interval
 
         cap.release()
 
+        # Decision rule 1: Direct OCR match against spoken words
+        if ocr_matches:
+            if key_tokens:
+                if len(ocr_matches) >= 2 or (len(ocr_matches) >= 1 and len(ocr_matches[0][1]) >= 2):
+                    logger.info(f"Subtitles detected via OCR transcript match ({len(ocr_matches)} frames matched)")
+                    return True
+            else:
+                if len(ocr_matches) >= 2:
+                    logger.info(f"Subtitles detected via general OCR words ({len(ocr_matches)} frames matched)")
+                    return True
+
         if len(samples) < 2:
             return False
 
+        # Decision rule 2: CV Word-Cluster Analysis
+        frames_with_words = sum(1 for s in samples if s["words"] >= 1)
+        frames_with_multi_words = sum(1 for s in samples if s["words"] >= 2)
+        total_s = len(samples)
+
+        pct_words = frames_with_words / total_s
+        pct_multi = frames_with_multi_words / total_s
+
         dynamic_changes = 0
         static_matches = 0
-
         for i in range(len(samples) - 1):
-            s_a = samples[i]
-            s_b = samples[i + 1]
+            s1 = samples[i]
+            s2 = samples[i + 1]
+            act1 = s1["text_pixels"]
+            act2 = s2["text_pixels"]
+            if act1 >= 30 or act2 >= 30:
+                diff = cv2.absdiff(s1["mask"], s2["mask"])
+                diff_px = int(np.sum(diff > 0))
+                max_px = max(act1, act2)
+                if max_px > 0:
+                    ratio = diff_px / max_px
+                    if ratio > 0.30:
+                        dynamic_changes += 1
+                    elif ratio < 0.10:
+                        static_matches += 1
 
-            # Check background stability in upper half of frame
-            bg_diff = float(np.mean(cv2.absdiff(s_a["bg"], s_b["bg"])))
-            if bg_diff > 18.0:
-                # Camera is panning, cutting, or moving rapidly - not a stable subtitle interval
-                continue
+        is_subtitles = (
+            (pct_words >= 0.40 and dynamic_changes >= 2 and dynamic_changes > static_matches) or
+            (pct_multi >= 0.35 and dynamic_changes >= 1)
+        )
 
-            m_a = s_a["mask"]
-            m_b = s_b["mask"]
+        if is_subtitles:
+            logger.info(f"Subtitles detected via CV word clusters (words={pct_words:.0%}, multi={pct_multi:.0%}, changes={dynamic_changes})")
+            return True
 
-            if m_a is None and m_b is None:
-                continue
-            if (m_a is None) != (m_b is None):
-                # Text appeared or disappeared during stable background
-                dynamic_changes += 1
-                continue
-
-            area_a = np.sum(m_a > 0)
-            area_b = np.sum(m_b > 0)
-            diff = cv2.absdiff(m_a, m_b)
-            diff_pixels = np.sum(diff > 0)
-            max_area = max(area_a, area_b)
-
-            if max_area > 0:
-                diff_ratio = diff_pixels / max_area
-                if diff_ratio > 0.45:
-                    # Text pixels changed substantially (different words spoken)
-                    dynamic_changes += 1
-                elif diff_ratio < 0.15:
-                    # Static object (laptop/desk/logo)
-                    static_matches += 1
-
-        is_subtitles = (dynamic_changes >= 2 and dynamic_changes > static_matches)
-        return is_subtitles
+        return False
     except Exception as exc:
         logger.warning(f"Subtitle pre-detection check failed, defaulting to burning subtitles: {exc}")
         return False
@@ -405,7 +485,30 @@ def cut_segment(
         elif burn_mode == "always":
             should_burn = True
         else:  # auto
-            has_real_subs = detect_hardcoded_subtitles(source_path, candidate.start_seconds, candidate.duration)
+            # Extract expected spoken words from ASS or candidate to guide OCR cross-matching
+            expected_words: list[str] = []
+            if ass_path and os.path.exists(ass_path):
+                try:
+                    with open(ass_path, "r", encoding="utf-8", errors="ignore") as f:
+                        for line in f:
+                            if line.startswith("Dialogue:") and "TopHook" not in line:
+                                parts = line.split(",", 9)
+                                if len(parts) >= 10:
+                                    clean_text = re.sub(r'\{[^}]*\}', '', parts[9])
+                                    expected_words.extend(re.findall(r'[a-zA-Z]{3,}', clean_text))
+                except Exception:
+                    pass
+            if not expected_words:
+                cand_text = f"{getattr(candidate, 'suggested_title', '')} {getattr(candidate, 'hook_headline', '')}"
+                expected_words = re.findall(r'[a-zA-Z]{3,}', cand_text)
+
+            expected_text = " ".join(expected_words) if expected_words else None
+            has_real_subs = detect_hardcoded_subtitles(
+                source_path,
+                candidate.start_seconds,
+                candidate.duration,
+                expected_text=expected_text,
+            )
             if has_real_subs:
                 should_burn = False
                 logger.info(f"Pre-existing dynamic subtitles detected in source for job {job_id}; skipping dialogue subtitle burn")
@@ -435,6 +538,8 @@ def cut_segment(
         if active_ass and os.path.exists(active_ass):
             safe_ass = str(Path(active_ass).absolute()).replace("\\", "/").replace(":", "\\:")
             crop_filter += f",subtitles='{safe_ass}'"
+
+
 
     # ffmpeg command with studio-grade settings:
     # -ss before -i: fast seek to nearest keyframe before start
