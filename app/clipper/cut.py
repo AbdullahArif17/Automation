@@ -198,11 +198,11 @@ def detect_hardcoded_subtitles(
         if is_vertical:
             # Vertical (9:16) - subtitles often in middle-lower area
             y1, y2 = int(h * 0.40), int(h * 0.88)
-            x1, x2 = int(w * 0.06), int(w * 0.94)
+            x1, x2 = int(w * 0.08), int(w * 0.92)
         else:
-            # Widescreen (16:9 / 4:3) - subtitles in lower 42%
-            y1, y2 = int(h * 0.55), int(h * 0.94)
-            x1, x2 = int(w * 0.06), int(w * 0.94)
+            # Widescreen (16:9 / 4:3) - lower 28% and middle 75%
+            y1, y2 = int(h * 0.68), int(h * 0.94)
+            x1, x2 = int(w * 0.12), int(w * 0.88)
 
         scale_factor = h / 720.0
 
@@ -325,9 +325,10 @@ def detect_hardcoded_subtitles(
         if len(samples) < 2:
             return False
 
-        # Decision rule 2: CV Word-Cluster Analysis
+        # Decision rule 2: CV Word-Cluster Analysis (density & dynamics)
         frames_with_words = sum(1 for s in samples if s["words"] >= 1)
         frames_with_multi_words = sum(1 for s in samples if s["words"] >= 2)
+        avg_pixels = np.mean([s["text_pixels"] for s in samples])
         total_s = len(samples)
 
         pct_words = frames_with_words / total_s
@@ -351,13 +352,16 @@ def detect_hardcoded_subtitles(
                     elif ratio < 0.10:
                         static_matches += 1
 
+        min_pixel_threshold = 150 * (scale_factor ** 2)
         is_subtitles = (
-            (pct_words >= 0.40 and dynamic_changes >= 2 and dynamic_changes > static_matches) or
-            (pct_multi >= 0.35 and dynamic_changes >= 1)
+            pct_words >= 0.60 and
+            avg_pixels >= min_pixel_threshold and
+            dynamic_changes >= 1 and
+            (static_matches == 0 or dynamic_changes >= static_matches or pct_words >= 0.75)
         )
 
         if is_subtitles:
-            logger.info(f"Subtitles detected via CV word clusters (words={pct_words:.0%}, multi={pct_multi:.0%}, changes={dynamic_changes})")
+            logger.info(f"Subtitles detected via CV word clusters (words={pct_words:.0%}, multi={pct_multi:.0%}, avg_px={avg_pixels:.0f}, changes={dynamic_changes})")
             return True
 
         return False
