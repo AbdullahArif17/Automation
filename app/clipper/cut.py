@@ -352,12 +352,13 @@ def detect_hardcoded_subtitles(
                     elif ratio < 0.10:
                         static_matches += 1
 
-        min_pixel_threshold = 150 * (scale_factor ** 2)
+        min_pixel_threshold = 200 * (scale_factor ** 2)
         is_subtitles = (
-            pct_words >= 0.60 and
+            pct_words >= 0.70 and
+            pct_multi >= 0.45 and
             avg_pixels >= min_pixel_threshold and
             dynamic_changes >= 1 and
-            (static_matches == 0 or dynamic_changes >= static_matches or pct_words >= 0.75)
+            (static_matches == 0 or dynamic_changes >= static_matches or pct_words >= 0.80)
         )
 
         if is_subtitles:
