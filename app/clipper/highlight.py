@@ -78,6 +78,17 @@ def get_niche_prompt_context(topic_context: Optional[str] = None) -> tuple[str, 
             "brutal roasts, shocking plot hole revelations, unscripted movie secrets, "
             "actors breaking character laughing, or awkward celebrity interview tension."
         )
+    # Sketch Comedy / Key & Peele / Relatable Skits / Parody Niche
+    if any(k in ctx for k in ("sketch", "skit", "key and peele", "peele", "key & peele", "rdcworld", "calebcity", "parody", "satire", "acting", "relatable", "dirt league", "viva", "comedy sketch", "snl")):
+        audience_focus = (
+            "brilliant sketch comedy and relatable comedic skits (Key & Peele, RDCWorld1, CalebCity, I Think You Should Leave, Viva La Dirt League): "
+            "hilarious character acting, absurd escalations, everyday relatable dilemmas taken to the extreme, awkward social confrontations, "
+            "and genius comedic punchlines."
+        )
+        tension_criteria = (
+            "absurd situational escalations, sudden unexpected comedic twists, hilarious overreactions, "
+            "awkward social tension that explodes into comedy, and unforgettable punchlines that make viewers burst out laughing."
+        )
         return audience_focus, tension_criteria
 
     # General Broad Viral Default
