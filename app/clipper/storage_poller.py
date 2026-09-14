@@ -376,6 +376,16 @@ def list_new_videos_youtube(
 
         data = _youtube_api_request("search", search_params)
         items_to_process = data.get("items", [])
+        if not items_to_process:
+            logger.info("Search with strict filters returned 0 items; attempting relaxed search without duration/order restrictions")
+            relaxed_params = {
+                "part": "snippet",
+                "q": search_query,
+                "type": "video",
+                "maxResults": 50,
+            }
+            data = _youtube_api_request("search", relaxed_params)
+            items_to_process = data.get("items", [])
     elif channel_input:
         channel_id = _resolve_channel_id(channel_input)
         if not playlist_id:
