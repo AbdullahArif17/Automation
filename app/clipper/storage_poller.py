@@ -223,7 +223,7 @@ def _youtube_api_request(path: str, params: dict) -> dict:
         with urllib.request.urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode())
 
-    return retry(_fetch, max_attempts=3, delay=1.5, retry_on=(urllib.error.URLError, TimeoutError))
+    return retry(_fetch, max_attempts=3, base_delay=1.5, retry_on=(urllib.error.URLError, TimeoutError))
 
 
 def _is_video_file(key: str) -> bool:

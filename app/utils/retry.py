@@ -22,6 +22,7 @@ def retry(
     *args,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     base_delay: float = DEFAULT_BASE_DELAY,
+    delay: float | None = None,
     backoff: float = 2.0,
     retry_on: Tuple[Type[Exception], ...] = (Exception,),
     **kwargs,
@@ -29,7 +30,10 @@ def retry(
     """Call `func` with exponential backoff on transient errors.
 
     Permanent (non-retryable) errors should not be in `retry_on`.
+    Accepts either `base_delay` or `delay`.
     """
+    if delay is not None:
+        base_delay = delay
     last_exc: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         try:
