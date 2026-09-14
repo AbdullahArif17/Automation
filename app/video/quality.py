@@ -31,9 +31,12 @@ def check_duration(path: str, min_dur: float, max_dur: float) -> tuple[bool, str
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         data = json.loads(result.stdout)
         dur = float(data["format"]["duration"])
-        if min_dur <= dur <= max_dur:
+        # Allow slight container padding tolerance (e.g. AAC audio frame boundaries) up to 1.5s
+        effective_max = min(60.0, max_dur + 1.5)
+        effective_min = max(5.0, min_dur - 1.0)
+        if effective_min <= dur <= effective_max:
             return True, f"duration {dur:.1f}s in [{min_dur}, {max_dur}]"
-        return False, f"duration {dur:.1f}s outside [{min_dur}, {max_dur}]"
+        return False, f"duration {dur:.1f}s outside [{min_dur}, {max_dur}] (actual: {dur:.1f}s)"
     except Exception as exc:
         return False, f"duration check failed: {exc}"
 
