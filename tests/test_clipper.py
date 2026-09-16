@@ -475,6 +475,40 @@ def test_build_crop_filter_dynamic_mode():
     assert "scale=1080:1920" in filter_str
 
 
+def test_build_crop_filter_taller_blur():
+    """Verify blur mode uses 4:5 portrait crop (1080x1350) covering ~70% screen height."""
+    from app.clipper.cut import build_crop_filter
+    from app.clipper.face_tracker import FramingPlan
+
+    # 1. Without framing_plan (raw blur mode)
+    filter_str = build_crop_filter("blur", 1920, 1080, 1080, 1920)
+    assert "boxblur=40" in filter_str
+    # 4:5 crop of 1080p source is 864x1080, scaled to 1080x1350
+    assert "crop=864:1080:528:0" in filter_str
+    assert "scale=1080:1350" in filter_str
+    assert "overlay=(W-w)/2:216" in filter_str
+
+    # 2. With framing_plan containing custom centered crop
+    plan = FramingPlan(mode="blur", crop_x=400, crop_y=0, crop_w=864, crop_h=1080)
+    plan_filter = build_crop_filter("auto", 1920, 1080, 1080, 1920, framing_plan=plan)
+    assert "crop=864:1080:400:0" in plan_filter
+    assert "scale=1080:1350" in plan_filter
+    assert "overlay=(W-w)/2:216" in plan_filter
+
+
+def test_make_blur_plan_portrait():
+    """Verify _make_blur_plan creates 4:5 portrait crop centered on detected faces."""
+    from app.clipper.face_tracker import _make_blur_plan
+
+    # Single face centered at x=1200 in 1920x1080
+    plan = _make_blur_plan(src_w=1920, src_h=1080, face_centers=[1200])
+    assert plan.mode == "blur"
+    assert plan.crop_w == 864
+    assert plan.crop_h == 1080
+    # Center 864 on 1200 -> 1200 - 432 = 768
+    assert plan.crop_x == 768
+
+
 def test_correct_words_with_llm_success():
     """Test smart subtitle phonetic & entity correction with LLM."""
     from app.ai.provider import MockProvider

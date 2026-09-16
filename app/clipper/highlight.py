@@ -178,7 +178,7 @@ Return ONLY valid JSON matching this exact schema:
       "comment_question": "<provocative or debate-sparking question related to this moment to ask viewers in the comments/description, e.g. 'Did she take it too far? 👇' or 'Who took the bigger L? 👇' or 'Would you react like this? 👇'>",
       "suggested_description": "<2 context-rich sentences explaining who is talking and what happened + high-volume search keywords + 'Subscribe for more!' + 4 specific #hashtags + #shorts>",
       "confidence": <0.0-1.0>,
-      "crop_mode": "<'center' or 'blur'>"
+      "crop_mode": "<'auto', 'center', or 'blur'>"
     }}
   ]
 }}
@@ -198,12 +198,14 @@ STRICT QUALITY RULES:
 5. STRICT DURATION BOUNDS (CRITICAL):
    - Duration MUST be between {min_dur:.0f} and {max_dur:.0f} seconds (optimal sweet spot is 25-40s for 85%+ completion rate).
    - Snippets under {min_dur:.0f}s or over {max_dur:.0f}s will be rejected.
-6. CROP MODE (CRITICAL FOR VISIBILITY):
-   - Use 'blur' for:
-     * REACTION videos (where a creator/streamer reacts to a video, fail, workout, or clip): ALWAYS use 'blur' so viewers see BOTH the reactor's face and the actual video happening on screen! Never crop out what is being reacted to!
-     * Clips with 2, 3, or more people on screen, group panels, podcast co-hosts, or wide studio interviews (keeps all people and reactions 100% visible).
-     * Gaming, wide action, or when visual context/screen edges matter.
-   - Use 'center' ONLY when there is strictly 1 single speaker centered on screen with no external video being reacted to.
+6. CROP MODE (CRITICAL FOR MAXIMUM SCREEN VISIBILITY):
+   - Use 'auto' (or 'center') for:
+     * Single-speaker podcast segments, monologues, speeches, individual interviews, and stand-up comedy (smart AI face tracking will dynamically frame the speaker for 100% full-screen vertical impact).
+     * High-energy moments, sports, or action where a primary subject is speaking.
+   - Use 'blur' ONLY for:
+     * REACTION videos (where a creator reacts to an on-screen video, fail, or workout): ALWAYS use 'blur' so viewers see BOTH the reactor and the source content in 4:5 taller framing!
+     * Permanent wide panels where 3+ people interact simultaneously across the whole room and cannot be framed individually.
+     * Gaming or wide scenes where extreme screen edges matter.
 7. ACCURATE CELEBRITY & SPEAKER NAMES (CRITICAL):
    - Use the SOURCE TOPIC / CONTEXT to verify exact celebrity, athlete, or influencer identities.
    - Do NOT confuse similar names. If unsure of an exact surname, use a clear role or persona descriptor.

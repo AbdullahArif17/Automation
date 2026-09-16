@@ -81,6 +81,59 @@ def _build_dynamic_crop_expr(shots: list[Any]) -> str:
     return expr
 
 
+def _build_taller_blur_filter(
+    src_w: int,
+    src_h: int,
+    target_w: int = 1080,
+    target_h: int = 1920,
+    crop_x: Optional[int] = None,
+    crop_y: Optional[int] = None,
+    crop_w: Optional[int] = None,
+    crop_h: Optional[int] = None,
+) -> str:
+    """Build high-impact 4:5 portrait blur filter filling ~70% of vertical screen height.
+
+    Instead of a narrow 16:9 letterbox (608px out of 1920px), foreground is cropped
+    to 4:5 portrait framing (1080x1350) and positioned in the upper-middle screen
+    (y=210px to y=1560px), matching top viral podcast/interview Shorts.
+    """
+    target_fg_ar = 4.0 / 5.0
+    src_ar = src_w / src_h
+
+    if crop_w and crop_h and crop_w > 0 and crop_h > 0:
+        actual_crop_w = min(src_w, crop_w)
+        actual_crop_h = min(src_h, crop_h)
+        actual_crop_x = max(0, min(crop_x or 0, src_w - actual_crop_w))
+        actual_crop_y = max(0, min(crop_y or 0, src_h - actual_crop_h))
+    else:
+        if src_ar >= target_fg_ar:
+            actual_crop_h = src_h
+            actual_crop_w = int(src_h * target_fg_ar)
+            actual_crop_x = (src_w - actual_crop_w) // 2
+            actual_crop_y = 0
+        else:
+            actual_crop_w = src_w
+            actual_crop_h = int(src_w / target_fg_ar)
+            actual_crop_x = 0
+            actual_crop_y = (src_h - actual_crop_h) // 2
+
+    fg_w = target_w
+    fg_h = int(fg_w * (actual_crop_h / actual_crop_w))
+    max_fg_h = int(target_h * 0.72)
+    if fg_h > max_fg_h:
+        fg_h = max_fg_h
+
+    overlay_y = max(180, int((target_h - fg_h) * 0.38))
+
+    return (
+        f"split[bg][fg];"
+        f"[bg]scale={target_w}:{target_h}:flags=lanczos:force_original_aspect_ratio=increase,crop={target_w}:{target_h},boxblur=40[bg_blurred];"
+        f"[fg]crop={actual_crop_w}:{actual_crop_h}:{actual_crop_x}:{actual_crop_y},"
+        f"scale={fg_w}:{fg_h}:flags=lanczos[fg_scaled];"
+        f"[bg_blurred][fg_scaled]overlay=(W-w)/2:{overlay_y}"
+    )
+
+
 def build_crop_filter(
     crop_mode: str,
     src_w: int,
@@ -102,11 +155,15 @@ def build_crop_filter(
     """
     if framing_plan is not None:
         if framing_plan.mode == "blur":
-            return (
-                f"split[bg][fg];"
-                f"[bg]scale={target_w}:{target_h}:flags=lanczos:force_original_aspect_ratio=increase,crop={target_w}:{target_h},boxblur=40[bg_blurred];"
-                f"[fg]scale={target_w}:{target_h}:flags=lanczos:force_original_aspect_ratio=decrease[fg_scaled];"
-                f"[bg_blurred][fg_scaled]overlay=(W-w)/2:(H-h)/2"
+            return _build_taller_blur_filter(
+                src_w=src_w,
+                src_h=src_h,
+                target_w=target_w,
+                target_h=target_h,
+                crop_x=getattr(framing_plan, "crop_x", None),
+                crop_y=getattr(framing_plan, "crop_y", None),
+                crop_w=getattr(framing_plan, "crop_w", None),
+                crop_h=getattr(framing_plan, "crop_h", None),
             )
         elif framing_plan.mode == "split":
             top_h = target_h // 2
@@ -131,14 +188,11 @@ def build_crop_filter(
             )
 
     if crop_mode == "blur":
-        # Split video into background and foreground.
-        # Background: scale to fill, crop, and heavily blur.
-        # Foreground: scale to fit (letterbox) and overlay on center with lanczos sharpness.
-        return (
-            f"split[bg][fg];"
-            f"[bg]scale={target_w}:{target_h}:flags=lanczos:force_original_aspect_ratio=increase,crop={target_w}:{target_h},boxblur=40[bg_blurred];"
-            f"[fg]scale={target_w}:{target_h}:flags=lanczos:force_original_aspect_ratio=decrease[fg_scaled];"
-            f"[bg_blurred][fg_scaled]overlay=(W-w)/2:(H-h)/2"
+        return _build_taller_blur_filter(
+            src_w=src_w,
+            src_h=src_h,
+            target_w=target_w,
+            target_h=target_h,
         )
     elif crop_mode in ("center", "auto", "smart", "face"):
         # Determine crop to get 9:16 from source

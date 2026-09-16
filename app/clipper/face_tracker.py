@@ -199,8 +199,8 @@ def analyze_clip_framing(
     5. Center Crop Fallback: for non-face / B-roll footage.
     """
     if preferred_crop_mode == "blur":
-        logger.info("Preferred crop mode is 'blur'; using aesthetic blurred background letterbox")
-        return _make_blur_plan()
+        logger.info("Preferred crop mode is 'blur'; using 4:5 portrait blur framing")
+        return _make_blur_plan(src_w, src_h, target_w=target_w, target_h=target_h)
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -298,20 +298,22 @@ def analyze_clip_framing(
     if corner_webcam_hits >= max(2, int(len(samples) * 0.18)):
         logger.info(
             f"Detected corner webcam / reaction video layout ({corner_webcam_hits}/{len(samples)} frames); "
-            f"automatically using aesthetic blur mode so both the reactor and the content are 100% visible"
+            f"automatically using 4:5 portrait blur framing so both reactor and content are visible"
         )
-        return _make_blur_plan()
+        flattened_faces = [x for s in samples for x in s.faces]
+        return _make_blur_plan(src_w, src_h, flattened_faces or None, target_w, target_h)
 
-    # 1. Check for 2 or more people in frame (Interviews, 2-person podcasts, panels, reactions, challenges)
-    # Whenever 2 or more faces appear, vertical 9:16 cropping cuts off one person or their reaction.
-    # We use aesthetic blur mode to keep both speakers and their interactions 100% visible side by side!
+    # 1. Check for 2 or more people continuously in frame (Permanent panels/couches across the whole clip)
+    # If 2+ faces are present in the majority of frames (>45%), engage 4:5 taller blur mode centered on speakers.
+    # Otherwise, proceed to Dynamic Scene-Aware Framing which cuts between speakers across shots.
     multi_face_frames = [f for f in all_face_centers if len(f) >= 2]
-    if len(multi_face_frames) >= max(2, int(len(all_face_centers) * 0.15)):
+    if len(multi_face_frames) >= max(3, int(len(all_face_centers) * 0.45)):
+        flattened_faces = [x for f in all_face_centers for x in f]
         logger.info(
-            f"Detected 2+ people in frame ({len(multi_face_frames)}/{len(all_face_centers)} frames with 2+ faces); "
-            f"automatically engaging aesthetic blur mode to keep all subjects and reactions 100% visible"
+            f"Detected continuous multi-person scene ({len(multi_face_frames)}/{len(all_face_centers)} frames with 2+ faces); "
+            f"engaging 4:5 taller portrait blur framing centered on subjects"
         )
-        return _make_blur_plan()
+        return _make_blur_plan(src_w, src_h, flattened_faces, target_w, target_h)
 
     # 2. Dynamic Scene-Aware Framing: analyze camera shots
     cut_timestamps.append(end_time)
@@ -378,8 +380,41 @@ def analyze_clip_framing(
     return _make_single_plan(src_w, src_h, median_x, target_w, target_h)
 
 
-def _make_blur_plan() -> FramingPlan:
-    return FramingPlan(mode="blur")
+def _make_blur_plan(
+    src_w: int = 1920,
+    src_h: int = 1080,
+    face_centers: Optional[list[int]] = None,
+    target_w: int = 1080,
+    target_h: int = 1920,
+) -> FramingPlan:
+    """Create 4:5 portrait blur framing plan centered on detected subjects."""
+    target_fg_ar = 4.0 / 5.0
+    base_crop_h = src_h
+    base_crop_w = min(src_w, int(src_h * target_fg_ar))
+
+    if face_centers:
+        min_x = min(face_centers)
+        max_x = max(face_centers)
+        margin = int(src_w * 0.12)
+        span = (max_x - min_x) + margin * 2
+        if span > base_crop_w:
+            crop_w = min(src_w, int(span))
+            mid_x = (min_x + max_x) // 2
+        else:
+            crop_w = base_crop_w
+            mid_x = int(np.median(face_centers))
+        crop_x = max(0, min(mid_x - crop_w // 2, src_w - crop_w))
+    else:
+        crop_w = base_crop_w
+        crop_x = (src_w - crop_w) // 2
+
+    return FramingPlan(
+        mode="blur",
+        crop_x=crop_x,
+        crop_y=0,
+        crop_w=crop_w,
+        crop_h=base_crop_h,
+    )
 
 
 def _make_center_plan(src_w: int, src_h: int, target_w: int, target_h: int) -> FramingPlan:
