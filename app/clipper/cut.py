@@ -103,7 +103,16 @@ def _build_taller_blur_filter(
     if crop_w and crop_h and crop_w > 0 and crop_h > 0:
         actual_crop_w = min(src_w, crop_w)
         actual_crop_h = min(src_h, crop_h)
-        actual_crop_x = max(0, min(crop_x or 0, src_w - actual_crop_w))
+        # Enforce 4:5 aspect ratio cap — if the crop is wider than 4:5,
+        # shrink width so fg_h stays tall (~1350px) instead of collapsing
+        # to ~607px when wide face spans push crop_w to full 1920.
+        if actual_crop_h > 0 and (actual_crop_w / actual_crop_h) > target_fg_ar:
+            actual_crop_w = int(actual_crop_h * target_fg_ar)
+            # Re-center the narrowed crop on the original crop center
+            orig_center_x = (crop_x or 0) + (crop_w // 2)
+            actual_crop_x = max(0, min(orig_center_x - actual_crop_w // 2, src_w - actual_crop_w))
+        else:
+            actual_crop_x = max(0, min(crop_x or 0, src_w - actual_crop_w))
         actual_crop_y = max(0, min(crop_y or 0, src_h - actual_crop_h))
     else:
         if src_ar >= target_fg_ar:
@@ -123,7 +132,7 @@ def _build_taller_blur_filter(
     if fg_h > max_fg_h:
         fg_h = max_fg_h
 
-    overlay_y = max(180, int((target_h - fg_h) * 0.38))
+    overlay_y = (target_h - fg_h) // 2
 
     return (
         f"split[bg][fg];"
@@ -595,7 +604,7 @@ def cut_segment(
                 active_ass = None
 
         if active_ass and os.path.exists(active_ass):
-            safe_ass = str(Path(active_ass).absolute()).replace("\\", "/").replace(":", "\\:")
+            safe_ass = str(Path(active_ass).absolute()).replace("\\", "/").replace(":", "\\:").replace("'", r"\'")
             crop_filter += f",subtitles='{safe_ass}'"
 
 

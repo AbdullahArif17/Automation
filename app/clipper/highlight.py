@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -143,6 +144,74 @@ class ClipCandidate:
         }
 
 
+def _sanitize_context(text: Optional[str]) -> str:
+    """Sanitize user/video topic context to prevent prompt injection."""
+    if not text:
+        return ""
+    clean = re.sub(r"[\r\n\t]+", " ", str(text)).strip()
+    clean = re.sub(r"(?i)(ignore (all )?previous instructions|system prompt|return only)", "", clean)
+    return clean[:200].strip()
+
+
+def chunk_transcript(
+    transcript: TranscriptResult,
+    chunk_duration: float = 1800.0,
+    overlap: float = 120.0,
+) -> list[TranscriptResult]:
+    """Split very long transcripts (>30min) into overlapping windows to prevent LLM context degradation."""
+    if transcript.duration <= chunk_duration + 300:
+        return [transcript]
+
+    chunks: list[TranscriptResult] = []
+    step = chunk_duration - overlap
+    current_start = 0.0
+
+    while current_start < transcript.duration:
+        current_end = min(transcript.duration, current_start + chunk_duration)
+        matching_segs = [
+            s for s in transcript.segments
+            if s.start >= current_start and s.end <= current_end
+        ]
+        if matching_segs:
+            chunks.append(TranscriptResult(
+                language=transcript.language,
+                language_probability=transcript.language_probability,
+                duration=transcript.duration,
+                segments=matching_segs,
+                source_path=transcript.source_path,
+            ))
+        if current_end >= transcript.duration:
+            break
+        current_start += step
+
+    return chunks or [transcript]
+
+
+def _dedup_candidates(candidates: list[ClipCandidate]) -> list[ClipCandidate]:
+    """Deduplicate overlapping candidates, keeping the one with higher confidence."""
+    if len(candidates) <= 1:
+        return candidates
+
+    sorted_c = sorted(candidates, key=lambda x: x.confidence, reverse=True)
+    kept: list[ClipCandidate] = []
+
+    for c in sorted_c:
+        overlap_found = False
+        for k in kept:
+            o_start = max(c.start_seconds, k.start_seconds)
+            o_end = min(c.end_seconds, k.end_seconds)
+            if o_end > o_start:
+                overlap_sec = o_end - o_start
+                min_dur = min(c.duration, k.duration)
+                if min_dur > 0 and (overlap_sec / min_dur) >= 0.5:
+                    overlap_found = True
+                    break
+        if not overlap_found:
+            kept.append(c)
+
+    return kept
+
+
 def build_highlight_prompt(transcript: TranscriptResult, min_dur: float, max_dur: float, topic_context: Optional[str] = None) -> str:
     """Build the prompt for Gemini/Ollama to select highlights."""
     audience_focus, tension_criteria = get_niche_prompt_context(topic_context)
@@ -152,7 +221,8 @@ def build_highlight_prompt(transcript: TranscriptResult, min_dur: float, max_dur
     for seg in transcript.segments:
         full_text += f"[{seg.start:.1f}-{seg.end:.1f}] {seg.text}\n"
 
-    context_block = f"\nSOURCE TOPIC / CONTEXT: {topic_context}\n" if topic_context else ""
+    safe_context = _sanitize_context(topic_context)
+    context_block = f"\nSOURCE TOPIC / CONTEXT: {safe_context}\n" if safe_context else ""
 
     return f"""You are an elite YouTube Shorts curator and viral video editor.
 Given the timestamped transcript below from a long-form video, identify 1-3 segments that will make powerful, self-contained standalone Shorts (25-45 seconds is the sweet spot).
@@ -395,39 +465,49 @@ def select_highlights(
                 from app.ai.ollama import OllamaProvider
                 provider = OllamaProvider()
 
-    prompt = build_highlight_prompt(transcript, min_dur, max_dur, topic_context=topic_context)
+    chunks = chunk_transcript(transcript)
+    all_candidates: list[ClipCandidate] = []
 
-    logger.info(f"requesting highlights from LLM (video duration: {transcript.duration:.1f}s, provider: {type(provider).__name__})",
-                extra={"job_id": job_id, "stage": "highlight", "status": "request"})
+    for chunk_idx, chunk in enumerate(chunks):
+        prompt = build_highlight_prompt(chunk, min_dur, max_dur, topic_context=topic_context)
 
-    # Try up to 2 times with automatic fallback to Ollama on failure
-    for attempt in range(1, 3):
-        try:
-            response = provider.generate(prompt, temperature=0.3)
-            candidates = parse_highlight_response(response, min_dur, max_dur, transcript.duration)
+        logger.info(
+            f"requesting highlights from LLM (chunk {chunk_idx+1}/{len(chunks)}, duration: {chunk.duration:.1f}s, provider: {type(provider).__name__})",
+            extra={"job_id": job_id, "stage": "highlight", "status": "request", "chunk": chunk_idx + 1},
+        )
 
-            # Log the model's reasoning for debugging
-            for i, c in enumerate(candidates):
-                logger.info(f"candidate {i+1}: [{c.start_seconds:.1f}-{c.end_seconds:.1f}] {c.reason} (conf={c.confidence:.2f})",
-                            extra={"job_id": job_id, "stage": "highlight", "status": "candidate"})
+        # Try up to 2 times with automatic fallback to Ollama on failure
+        for attempt in range(1, 3):
+            try:
+                response = provider.generate(prompt, temperature=0.3)
+                candidates = parse_highlight_response(response, min_dur, max_dur, transcript.duration)
+                all_candidates.extend(candidates)
+                break
 
-            logger.info(f"selected {len(candidates)} valid highlight(s)",
-                        extra={"job_id": job_id, "stage": "highlight", "status": "done"})
-            return candidates[:max_candidates]
+            except Exception as exc:
+                from app.ai.ollama import OllamaProvider
+                if not isinstance(provider, OllamaProvider) and attempt == 1:
+                    logger.warning(
+                        f"Gemini highlight selection failed ({exc}); falling back to local Ollama ({settings.ollama_model})...",
+                        extra={"job_id": job_id, "stage": "highlight", "status": "ollama_fallback"}
+                    )
+                    provider = OllamaProvider()
+                    continue
 
-        except Exception as exc:
-            from app.ai.ollama import OllamaProvider
-            if not isinstance(provider, OllamaProvider) and attempt == 1:
-                logger.warning(
-                    f"Gemini highlight selection failed ({exc}); falling back to local Ollama ({settings.ollama_model})...",
-                    extra={"job_id": job_id, "stage": "highlight", "status": "ollama_fallback"}
-                )
-                provider = OllamaProvider()
-                continue
+                logger.warning(f"highlight selection attempt {attempt} failed: {exc}",
+                               extra={"job_id": job_id, "stage": "highlight", "status": "retry", "attempt": attempt})
+                if attempt == 2 and not all_candidates:
+                    raise RuntimeError(f"LLM failed to return valid highlights after 2 attempts: {exc}")
 
-            logger.warning(f"highlight selection attempt {attempt} failed: {exc}",
-                           extra={"job_id": job_id, "stage": "highlight", "status": "retry", "attempt": attempt})
-            if attempt == 2:
-                raise RuntimeError(f"LLM failed to return valid highlights after 2 attempts: {exc}")
+    deduped = _dedup_candidates(all_candidates)
+    if not deduped:
+        raise RuntimeError("highlight selection failed: no valid candidates found")
 
-    raise RuntimeError("highlight selection failed unexpectedly")
+    # Log the model's reasoning for debugging
+    for i, c in enumerate(deduped[:max_candidates]):
+        logger.info(f"candidate {i+1}: [{c.start_seconds:.1f}-{c.end_seconds:.1f}] {c.reason} (conf={c.confidence:.2f})",
+                    extra={"job_id": job_id, "stage": "highlight", "status": "candidate"})
+
+    logger.info(f"selected {len(deduped[:max_candidates])} valid highlight(s)",
+                extra={"job_id": job_id, "stage": "highlight", "status": "done"})
+    return deduped[:max_candidates]

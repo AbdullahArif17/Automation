@@ -31,14 +31,35 @@ MODEL_CACHE_DIR = Path.home() / ".cache" / "yunet"
 MODEL_PATH = MODEL_CACHE_DIR / "face_detection_yunet_2023mar.onnx"
 
 
+YUNET_MODEL_SHA256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
+
+
 def _ensure_yunet_model() -> Optional[str]:
-    """Download YuNet ONNX model to local cache if not present."""
+    """Download YuNet ONNX model to local cache if not present, with checksum validation."""
+    import hashlib
+
     if MODEL_PATH.exists():
-        return str(MODEL_PATH)
+        try:
+            content = MODEL_PATH.read_bytes()
+            if hashlib.sha256(content).hexdigest() == YUNET_MODEL_SHA256:
+                return str(MODEL_PATH)
+            logger.warning("Cached YuNet model checksum mismatch; re-downloading...")
+            MODEL_PATH.unlink(missing_ok=True)
+        except Exception as exc:
+            logger.warning(f"Error validating cached YuNet model: {exc}")
+            MODEL_PATH.unlink(missing_ok=True)
+
     try:
         MODEL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         logger.info(f"Downloading YuNet face detection model to {MODEL_PATH}...")
-        urllib.request.urlretrieve(YUNET_MODEL_URL, str(MODEL_PATH))
+        tmp_path = MODEL_PATH.with_suffix(".tmp")
+        urllib.request.urlretrieve(YUNET_MODEL_URL, str(tmp_path))
+        downloaded = tmp_path.read_bytes()
+        if hashlib.sha256(downloaded).hexdigest() != YUNET_MODEL_SHA256:
+            logger.warning("Downloaded YuNet model checksum mismatch; falling back to Haar")
+            tmp_path.unlink(missing_ok=True)
+            return None
+        tmp_path.replace(MODEL_PATH)
         return str(MODEL_PATH)
     except Exception as exc:
         logger.warning(f"Could not download YuNet model, will fallback to Haar cascade: {exc}")
@@ -228,58 +249,63 @@ def analyze_clip_framing(
     consecutive_fails = 0
 
     # Sample frames across clip duration (e.g., every 0.5s)
-    while current_time < end_time:
-        frame_idx = int(current_time * fps)
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-        ret, frame = cap.read()
-        if not ret or frame is None:
-            # Fallback to ffmpeg for codecs (e.g. AV1 in WSL) where OpenCV fails
-            frame = _extract_frame_ffmpeg(video_path, current_time)
+    try:
+        while current_time < end_time:
+            frame_idx = int(current_time * fps)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ret, frame = cap.read()
+            if not ret or frame is None:
+                # Fallback to ffmpeg for codecs (e.g. AV1 in WSL) where OpenCV fails
+                frame = _extract_frame_ffmpeg(video_path, current_time)
 
-        if frame is None:
-            consecutive_fails += 1
-            if consecutive_fails >= 5 and total_sampled == 0:
-                break
+            if frame is None:
+                consecutive_fails += 1
+                if consecutive_fails >= 5 and total_sampled == 0:
+                    break
+                current_time += sample_interval
+                continue
+
+            consecutive_fails = 0
+            total_sampled += 1
+
+            # Resize for faster face detection (skip if source is already small)
+            if src_w > 640:
+                scale = 640.0 / src_w
+                detect_h = int(src_h * scale)
+                small_frame = cv2.resize(frame, (640, detect_h))
+            else:
+                scale = 1.0
+                small_frame = frame
+
+            detected = detector.detect(small_frame)
+            frame_centers = []
+            frame_boxes = []
+            for face in detected:
+                orig_cx = int(face.center_x / scale)
+                orig_cy = int(face.center_y / scale)
+                orig_w = int(face.w / scale)
+                orig_h = int(face.h / scale)
+                frame_centers.append(orig_cx)
+                frame_boxes.append((orig_cx, orig_cy, orig_w, orig_h))
+
+            # Scene change / camera cut detection:
+            # Downscale grayscale to (160, 90) for fast difference check
+            gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
+            thumb = cv2.resize(gray, (160, 90))
+
+            if prev_thumb is not None:
+                diff = float(np.mean(cv2.absdiff(thumb, prev_thumb)))
+                # A camera switch between different angles/people yields diff > 28
+                # Minimum shot length = 1.5s to prevent jitter on quick movement
+                if diff > 28.0 and (current_time - last_cut) >= 1.5:
+                    cut_timestamps.append(current_time)
+                    last_cut = current_time
+
+            prev_thumb = thumb
+            samples.append(_FrameSample(time=current_time, faces=sorted(frame_centers), face_boxes=frame_boxes, thumb=thumb))
             current_time += sample_interval
-            continue
-
-        consecutive_fails = 0
-        total_sampled += 1
-
-        # Resize for faster face detection (width=640)
-        scale = 640.0 / src_w
-        detect_h = int(src_h * scale)
-        small_frame = cv2.resize(frame, (640, detect_h))
-
-        detected = detector.detect(small_frame)
-        frame_centers = []
-        frame_boxes = []
-        for face in detected:
-            orig_cx = int(face.center_x / scale)
-            orig_cy = int(face.center_y / scale)
-            orig_w = int(face.w / scale)
-            orig_h = int(face.h / scale)
-            frame_centers.append(orig_cx)
-            frame_boxes.append((orig_cx, orig_cy, orig_w, orig_h))
-
-        # Scene change / camera cut detection:
-        # Downscale grayscale to (160, 90) for fast difference check
-        gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
-        thumb = cv2.resize(gray, (160, 90))
-
-        if prev_thumb is not None:
-            diff = float(np.mean(cv2.absdiff(thumb, prev_thumb)))
-            # A camera switch between different angles/people yields diff > 28
-            # Minimum shot length = 1.5s to prevent jitter on quick movement
-            if diff > 28.0 and (current_time - last_cut) >= 1.5:
-                cut_timestamps.append(current_time)
-                last_cut = current_time
-
-        prev_thumb = thumb
-        samples.append(_FrameSample(time=current_time, faces=sorted(frame_centers), face_boxes=frame_boxes, thumb=thumb))
-        current_time += sample_interval
-
-    cap.release()
+    finally:
+        cap.release()
 
     all_face_centers = [s.faces for s in samples if s.faces]
     if not all_face_centers:

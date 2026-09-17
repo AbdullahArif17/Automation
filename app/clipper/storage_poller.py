@@ -37,18 +37,69 @@ logger = get_logger(__name__)
 # Note: Chrome UA removed — tv/android_vr clients use different UA strings; yt-dlp handles
 # client-appropriate UA automatically when player_client is specified.
 # Note: Using android and web clients because android_vr and tv often reject cookies.
+_IPV6_CACHE: Optional[bool] = None
+
+
 def _has_ipv6() -> bool:
-    """Check if this machine has an active IPv6 route to the internet."""
-    import socket
+    """Check if this machine has an active IPv6 route to the internet (cached)."""
+    global _IPV6_CACHE
+    if _IPV6_CACHE is not None:
+        return _IPV6_CACHE
     if os.getenv("FORCE_IPV6", "").lower() in ("1", "true", "yes"):
+        _IPV6_CACHE = True
         return True
     try:
         sock = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+        sock.settimeout(1.0)
         sock.connect(("2001:4860:4860::8888", 53))
         sock.close()
+        _IPV6_CACHE = True
         return True
     except Exception:
+        _IPV6_CACHE = False
         return False
+
+
+_BLACKLIST_CACHE: Optional[tuple[str, ...]] = None
+
+
+def _get_blacklisted_broadcasters() -> tuple[str, ...]:
+    """Load blacklisted broadcasters from external file or fall back to safe defaults."""
+    global _BLACKLIST_CACHE
+    if _BLACKLIST_CACHE is not None:
+        return _BLACKLIST_CACHE
+
+    custom_path = os.getenv("CLIP_BLACKLIST_PATH", "data/blacklist.txt")
+    loaded: list[str] = []
+    candidates = [
+        Path(custom_path),
+        Path(__file__).resolve().parent.parent.parent / "data" / "blacklist.txt",
+    ]
+    for p in candidates:
+        if p.exists():
+            try:
+                for line in p.read_text(encoding="utf-8").splitlines():
+                    s = line.strip().lower()
+                    if s and not s.startswith("#"):
+                        loaded.append(s)
+                break
+            except Exception as exc:
+                logger.warning(f"Failed to read blacklist from {p}: {exc}")
+
+    if not loaded:
+        loaded = [
+            "sky sports", "skysports", "tnt sports", "tntsports", "bt sport", "btsport",
+            "match of the day", "motd", "bbc sport", "premier league", "uefa", "bein sports",
+            "beinsports", "dazn", "super sunday", "monday night football", "optus sport", "espn",
+            "saturday night live", "snl", "nbc", "nbcuniversal", "cbs", "paramount",
+            "abc news", "disney", "comedy central", "viacom", "hbo", "warner bros", "wbd",
+            "fox entertainment", "netflix", "hulu", "the tonight show", "jimmy fallon",
+            "jimmy kimmel", "stephen colbert", "late late show", "james corden", "seth meyers",
+            "daily show", "last week tonight", "john oliver", "conan o'brien"
+        ]
+
+    _BLACKLIST_CACHE = tuple(dict.fromkeys(loaded))
+    return _BLACKLIST_CACHE
 
 
 def _get_yt_dlp_common_args() -> list[str]:
@@ -391,13 +442,26 @@ def list_new_videos_youtube(
         if not playlist_id:
             playlist_id = _get_uploads_playlist_id(channel_id)
 
-        # Fetch playlist items (newest first)
-        data = _youtube_api_request("playlistItems", {
-            "part": "snippet,contentDetails",
-            "playlistId": playlist_id,
-            "maxResults": 50,  
-        })
-        items_to_process = data.get("items", [])
+        # Fetch playlist items with pagination (newest first)
+        items_to_process = []
+        page_token: Optional[str] = None
+        while len(items_to_process) < max_videos:
+            fetch_count = min(50, max_videos - len(items_to_process))
+            p_params: dict[str, Any] = {
+                "part": "snippet,contentDetails",
+                "playlistId": playlist_id,
+                "maxResults": fetch_count,
+            }
+            if page_token:
+                p_params["pageToken"] = page_token
+            data = _youtube_api_request("playlistItems", p_params)
+            page_items = data.get("items", [])
+            if not page_items:
+                break
+            items_to_process.extend(page_items)
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
     else:
         raise RuntimeError("Must provide either channel_input or search_query")
 
@@ -477,18 +541,7 @@ def list_new_videos_youtube(
         # Content ID / Copyright Safeguard: Blacklist TV broadcast networks with automated global blocks
         channel_title = v.get("snippet", {}).get("channelTitle", "")
         ch_lower = channel_title.lower()
-        blacklisted_broadcasters = (
-            # Sports TV broadcast networks (Strict Content ID blocks)
-            "sky sports", "skysports", "tnt sports", "tntsports", "bt sport", "btsport",
-            "match of the day", "motd", "bbc sport", "premier league", "uefa", "bein sports",
-            "beinsports", "dazn", "super sunday", "monday night football", "optus sport", "espn",
-            # Major TV broadcast networks & late-night shows (Automated Global Content ID)
-            "saturday night live", "snl", "nbc", "nbcuniversal", "cbs", "paramount",
-            "abc news", "disney", "comedy central", "viacom", "hbo", "warner bros", "wbd",
-            "fox entertainment", "netflix", "hulu", "the tonight show", "jimmy fallon",
-            "jimmy kimmel", "stephen colbert", "late late show", "james corden", "seth meyers",
-            "daily show", "last week tonight", "john oliver", "conan o'brien"
-        )
+        blacklisted_broadcasters = _get_blacklisted_broadcasters()
         if any(b in ch_lower for b in blacklisted_broadcasters) or any(b in title_lower for b in blacklisted_broadcasters):
             logger.info(f"Skipping video from blacklisted TV broadcaster / show ('{channel_title}'): {title}")
             continue

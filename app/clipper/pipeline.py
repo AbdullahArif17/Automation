@@ -203,9 +203,18 @@ class ClipperPipeline:
                     clip_outcome.duplicate_result = duplicate
 
                     if duplicate.is_duplicate:
-                        logger.warning(f"clip {idx+1} duplicate detected: {duplicate.reason}",
-                                       extra={"job_id": jid, "stage": "duplicate", "status": "duplicate"})
-                        # Don't fail - just log. User can decide to upload or not.
+                        logger.warning(
+                            f"clip {idx+1} duplicate detected: {duplicate.reason}",
+                            extra={"job_id": jid, "stage": "duplicate", "status": "duplicate"},
+                        )
+                        if os.getenv("CLIP_ALLOW_DUPLICATES", "").lower() not in ("1", "true", "yes"):
+                            logger.info(
+                                f"Skipping clip {idx+1} due to duplicate match; set CLIP_ALLOW_DUPLICATES=true to override",
+                                extra={"job_id": jid, "stage": "duplicate", "status": "skipped"},
+                            )
+                            clip_outcome.error = f"duplicate: {duplicate.reason}"
+                            outcomes.append(clip_outcome)
+                            continue
 
                     # Record this clip in videos table (each clip gets its own tracked record)
                     if idx == 0:
@@ -245,8 +254,8 @@ class ClipperPipeline:
                 except Exception as exc:
                     clip_outcome.error = str(exc)
                     outcomes.append(clip_outcome)
-                    logger.error(f"clip {idx+1} failed: {exc}",
-                                 extra={"job_id": jid, "stage": f"clip_{idx+1}", "status": "error"})
+                    logger.exception(f"clip {idx+1} failed: {exc}",
+                                     extra={"job_id": jid, "stage": f"clip_{idx+1}", "status": "error"})
                     # Continue with next candidate rather than failing whole pipeline
 
             self.db.set_job_state(job_db_id, JobState.PUBLISHED if any(o.published for o in outcomes) else JobState.READY, stage="done")

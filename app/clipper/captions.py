@@ -139,6 +139,8 @@ def build_caption_track_from_whisper(
             # Clamp to clip bounds
             w_start = max(0.0, w_start)
             w_end = min(clip_duration, w_end)
+            if w_end <= w_start:
+                continue
             clip_words.append((w.word, w_start, w_end))
 
     if not clip_words:
