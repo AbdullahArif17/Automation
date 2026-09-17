@@ -427,6 +427,13 @@ def list_new_videos_youtube(
 
         data = _youtube_api_request("search", search_params)
         items_to_process = data.get("items", [])
+        if not items_to_process and "publishedAfter" in search_params:
+            logger.info("Search with publishedAfter returned 0 items; retrying without date restriction")
+            relaxed_date_params = dict(search_params)
+            relaxed_date_params.pop("publishedAfter", None)
+            data = _youtube_api_request("search", relaxed_date_params)
+            items_to_process = data.get("items", [])
+
         if not items_to_process:
             logger.info("Search with strict filters returned 0 items; attempting relaxed search without duration/order restrictions")
             relaxed_params = {
