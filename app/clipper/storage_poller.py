@@ -478,9 +478,16 @@ def list_new_videos_youtube(
         channel_title = v.get("snippet", {}).get("channelTitle", "")
         ch_lower = channel_title.lower()
         blacklisted_broadcasters = (
+            # Sports TV broadcast networks (Strict Content ID blocks)
             "sky sports", "skysports", "tnt sports", "tntsports", "bt sport", "btsport",
             "match of the day", "motd", "bbc sport", "premier league", "uefa", "bein sports",
-            "beinsports", "dazn", "super sunday", "monday night football", "optus sport"
+            "beinsports", "dazn", "super sunday", "monday night football", "optus sport", "espn",
+            # Major TV broadcast networks & late-night shows (Automated Global Content ID)
+            "saturday night live", "snl", "nbc", "nbcuniversal", "cbs", "paramount",
+            "abc news", "disney", "comedy central", "viacom", "hbo", "warner bros", "wbd",
+            "fox entertainment", "netflix", "hulu", "the tonight show", "jimmy fallon",
+            "jimmy kimmel", "stephen colbert", "late late show", "james corden", "seth meyers",
+            "daily show", "last week tonight", "john oliver", "conan o'brien"
         )
         if any(b in ch_lower for b in blacklisted_broadcasters) or any(b in title_lower for b in blacklisted_broadcasters):
             logger.info(f"Skipping video from blacklisted TV broadcaster / show ('{channel_title}'): {title}")
