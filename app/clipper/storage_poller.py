@@ -852,12 +852,33 @@ def poll_and_clip(
             clean_sq = search_query.strip(' "\'')
             if "|" in clean_sq:
                 queries = [q.strip(' "\'') for q in clean_sq.split("|") if q.strip(' "\'')]
-                if queries:
-                    search_query = select_adaptive_query(db, queries)
+                tried_queries: set[str] = set()
+                new_videos = []
+                while queries and len(tried_queries) < min(len(queries), 5):
+                    candidates_to_try = [q for q in queries if q not in tried_queries]
+                    if not candidates_to_try:
+                        break
+                    chosen_q = select_adaptive_query(db, candidates_to_try)
+                    tried_queries.add(chosen_q)
+                    new_videos = list_new_videos_youtube(
+                        db, channel_input=channel_id, playlist_id=playlist_id,
+                        search_query=chosen_q, max_videos=candidate_pool_size,
+                        dedup_days=dedup_days
+                    )
+                    if new_videos:
+                        break
+                    logger.info(f"Query '{chosen_q}' yielded 0 new candidates; trying next query from pool...")
             else:
-                search_query = clean_sq
-
-        new_videos = list_new_videos_youtube(db, channel_input=channel_id, playlist_id=playlist_id, search_query=search_query, max_videos=candidate_pool_size, dedup_days=dedup_days)
+                new_videos = list_new_videos_youtube(
+                    db, channel_input=channel_id, playlist_id=playlist_id,
+                    search_query=clean_sq, max_videos=candidate_pool_size,
+                    dedup_days=dedup_days
+                )
+        else:
+            new_videos = list_new_videos_youtube(
+                db, channel_input=channel_id, playlist_id=playlist_id,
+                max_videos=candidate_pool_size, dedup_days=dedup_days
+            )
         download_fn = download_video_youtube
     else:
         raise RuntimeError(f"Unknown CLIP_SOURCE_MODE: {source_mode} (must be 's3' or 'youtube')")
