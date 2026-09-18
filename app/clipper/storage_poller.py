@@ -107,7 +107,7 @@ def _get_yt_dlp_common_args() -> list[str]:
     args = [
         "--js-runtimes", "deno",
         "--remote-components", "ejs:github",
-        "--extractor-args", "youtube:player_client=web,tv,web_safari",
+        "--extractor-args", "youtube:player_client=mweb,ios;formats=missing_pot",
     ]
     if _has_ipv6():
         args.append("--force-ipv6")
@@ -549,7 +549,14 @@ def list_new_videos_youtube(
         channel_title = v.get("snippet", {}).get("channelTitle", "")
         ch_lower = channel_title.lower()
         blacklisted_broadcasters = _get_blacklisted_broadcasters()
-        if any(b in ch_lower for b in blacklisted_broadcasters) or any(b in title_lower for b in blacklisted_broadcasters):
+        network_channel_match = any(b in ch_lower for b in blacklisted_broadcasters)
+        show_blacklist = (
+            "saturday night live", "snl", "the tonight show", "late late show",
+            "daily show", "last week tonight", "match of the day"
+        )
+        show_title_match = any(s in title_lower for s in show_blacklist)
+
+        if network_channel_match or show_title_match:
             logger.info(f"Skipping video from blacklisted TV broadcaster / show ('{channel_title}'): {title}")
             continue
 
