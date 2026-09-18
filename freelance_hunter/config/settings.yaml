@@ -1,0 +1,26 @@
+polling:
+  interval_seconds: 180  # check every 3 minutes
+  max_job_age_minutes: 60  # only alert for jobs posted in the last 60 minutes
+
+filters:
+  min_budget_usd: 30
+  queries:
+    - "fastapi"
+    - "next.js"
+    - "react"
+    - "python automation"
+    - "playwright"
+    - "web scraping"
+    - "rag"
+    - "llm"
+    - "full stack"
+
+notifications:
+  # Configure one or both:
+  telegram:
+    enabled: false
+    bot_token: ""  # Add token from @BotFather
+    chat_id: ""    # Add your personal chat ID from @userinfobot
+  discord:
+    enabled: false
+    webhook_url: ""  # Add your Discord channel webhook URL

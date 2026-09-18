@@ -1,0 +1,108 @@
+candidate:
+  name: "Abdullah Arif"
+  first_name: "Abdullah"
+  last_name: "Arif"
+  title: "Full-Stack Developer"
+  email: "abdullaharif893@gmail.com"
+  phone: "+92 336 2725979"
+  location: "Karachi, Pakistan"
+  timezone: "Asia/Karachi (UTC+5)"
+  open_to_remote: true
+  preferred_work_type: "Remote / Global Contractor"
+  links:
+    portfolio: "https://my-portfolio-nine-chi-62.vercel.app/"
+    linkedin: "https://www.linkedin.com/in/abdullah-arif-89ab862b4/"
+    github: "https://github.com/AbdullahArif17"
+
+summary: >
+  Full-Stack Developer skilled in Next.js, FastAPI, and AI/LLM integration.
+  Builds and independently ships production-style applications end-to-end — from
+  RAG chatbots to full-stack platforms — using modern, AI-assisted development workflows.
+  Comfortable working across the stack: frontend, backend, databases, and deployment.
+
+skills:
+  languages:
+    - "TypeScript"
+    - "JavaScript"
+    - "Python"
+    - "C"
+  frontend:
+    - "Next.js"
+    - "React"
+    - "Tailwind CSS"
+    - "HTML/CSS"
+  backend:
+    - "FastAPI"
+    - "Node.js"
+    - "Express.js"
+    - "REST APIs"
+  ai_ml:
+    - "Gemini API"
+    - "RAG Pipelines"
+    - "Vector Search (Qdrant)"
+    - "LLM Integration"
+  databases:
+    - "Supabase"
+    - "PostgreSQL"
+    - "MongoDB"
+    - "Sanity.io"
+  tools:
+    - "Git"
+    - "GitHub"
+    - "Vercel"
+    - "HuggingFace Spaces"
+    - "Docker"
+    - "Linux/WSL"
+    - "Playwright"
+
+projects:
+  - name: "AI-Powered RAG Chatbot"
+    stack: "FastAPI · Qdrant · Gemini API · Supabase · HuggingFace Spaces"
+    description: >
+      Built and deployed a retrieval-augmented generation chatbot with a full vector search
+      pipeline for context-aware, real-time query answering. Resolved production issues
+      including webhook duplication, API timeout handling, and concurrency bottlenecks.
+      Deployed entirely on free-tier infrastructure.
+
+  - name: "Full-Stack Todo AI App (Taskflow)"
+    stack: "Next.js · FastAPI · PostgreSQL · Vercel"
+    description: >
+      Developed a full-stack task management application with Next.js frontend and FastAPI
+      backend. Designed and deployed a PostgreSQL-backed REST API; resolved deployment issues
+      across CORS, module imports, and DB foreign key constraints.
+
+  - name: "Personal AI Employee / Automation Agent"
+    stack: "Gemini API · Playwright · LinkedIn API · Odoo 17"
+    description: >
+      Built an automation agent covering social media posting (LinkedIn, Facebook, Instagram)
+      and Odoo accounting integration during a competitive hackathon.
+
+  - name: "AI-Native Technical Book + RAG Chatbot"
+    stack: "Docusaurus · FastAPI · Vector Search"
+    description: >
+      Built a spec-driven technical documentation site with an integrated RAG chatbot for
+      intelligent, content-aware querying.
+
+  - name: "Institutional Website Build"
+    stack: "Next.js 14 · TypeScript · Tailwind CSS"
+    description: >
+      Designed and built a complete responsive website for an educational institution, from spec to deployment.
+
+education:
+  - degree: "BS Computer Science"
+    institution: "Sindh Madressatul Islam University (SMIU)"
+    period: "Sep 2025 – Present"
+  - program: "Web Development"
+    institution: "Governor Sindh IT Program (GIAIC)"
+    period: "2024 – Present"
+
+languages:
+  - "English (Fluent)"
+  - "Urdu (Native)"
+
+standard_answers:
+  salary_expectations: "Open to competitive market rates for remote developers ($20,000 - $40,000 USD / year or $15 - $30 / hour)"
+  notice_period: "Immediately available / Can start right away"
+  visa_sponsorship: "No visa sponsorship required. Seeking remote / international contractor arrangement."
+  authorized_to_work: "Yes, fully authorized to work as a remote contractor."
+  hear_about_us: "Online job board / Company Careers page"
