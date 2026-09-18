@@ -16,11 +16,29 @@ filters:
     - "full stack"
 
 notifications:
-  # Configure one or both:
+  # 1. WhatsApp Notification (via CallMeBot free API)
+  # Setup: Send WhatsApp message 'I allow callmebot to send me messages' to +34 644 44 49 64 to get your apikey
+  whatsapp:
+    enabled: false
+    phone_number: "+923362725979"
+    api_key: ""  # Received from CallMeBot
+
+  # 2. Email Notification (via Gmail SMTP or custom)
+  email:
+    enabled: false
+    smtp_server: "smtp.gmail.com"
+    smtp_port: 465
+    sender_email: "abdullaharif893@gmail.com"
+    sender_password: ""  # Gmail 16-character App Password
+    recipient_email: "abdullaharif893@gmail.com"
+
+  # 3. Telegram Bot
   telegram:
     enabled: false
-    bot_token: ""  # Add token from @BotFather
-    chat_id: ""    # Add your personal chat ID from @userinfobot
+    bot_token: ""
+    chat_id: ""
+
+  # 4. Discord Webhook
   discord:
     enabled: false
-    webhook_url: ""  # Add your Discord channel webhook URL
+    webhook_url: ""
