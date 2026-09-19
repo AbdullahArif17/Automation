@@ -225,7 +225,7 @@ def build_highlight_prompt(transcript: TranscriptResult, min_dur: float, max_dur
     context_block = f"\nSOURCE TOPIC / CONTEXT: {safe_context}\n" if safe_context else ""
 
     return f"""You are an elite YouTube Shorts curator and viral video editor.
-Given the timestamped transcript below from a long-form video, identify 1-3 segments that will make powerful, self-contained standalone Shorts (25-45 seconds is the sweet spot).
+Given the timestamped transcript below from a long-form video, identify 2-3 distinct segments that will make powerful, self-contained standalone Shorts (25-45 seconds is the sweet spot).
 
 The most important rule: ANY VIEWER who has never seen this podcast or video before MUST be hooked within the first 3 seconds. The clip must feel like a complete, satisfying mini-story or argument, NOT a random chopped fragment.
 {context_block}
@@ -284,7 +284,7 @@ STRICT QUALITY RULES:
 9. VIRAL TENSION & HIGH-ENERGY MOMENTS (CRITICAL):
    - Prioritize moments with the highest energy and emotional reaction: {tension_criteria}
    - If a video contains a stunning, funny, or jaw-dropping exchange, always select it as candidate #1.
-10. Return 1-3 candidates, best first.
+10. Return 2-3 distinct, non-overlapping candidates, best first.
 """
 
 
@@ -325,10 +325,14 @@ def parse_highlight_response(response: str, min_dur: float, max_dur: float, vide
 
         dur = end - start
 
-        # If slightly over max_dur (e.g. 60.5s or 63s), clamp to max_dur gracefully
-        if dur > max_dur and dur <= max_dur + 5.0:
+        # If slightly over max_dur (e.g. 56s-75s), clamp to max_dur gracefully instead of discarding
+        if dur > max_dur and dur <= max_dur + 20.0:
             end = start + max_dur
             dur = max_dur
+        # If slightly under min_dur (e.g. 15s-19.9s), expand to min_dur if within video bounds
+        elif dur < min_dur and dur >= max(10.0, min_dur - 6.0) and (start + min_dur) <= video_duration:
+            end = start + min_dur
+            dur = min_dur
 
         # Validate duration bounds
         if not (min_dur <= dur <= max_dur):

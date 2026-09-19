@@ -107,7 +107,7 @@ def _get_yt_dlp_common_args() -> list[str]:
     args = [
         "--js-runtimes", "deno",
         "--remote-components", "ejs:github",
-        "--extractor-args", "youtube:player_client=mweb,ios;formats=missing_pot",
+        "--extractor-args", "youtube:player_client=android_creator",
     ]
     if _has_ipv6():
         args.append("--force-ipv6")
@@ -853,21 +853,31 @@ def poll_and_clip(
             if "|" in clean_sq:
                 queries = [q.strip(' "\'') for q in clean_sq.split("|") if q.strip(' "\'')]
                 tried_queries: set[str] = set()
-                new_videos = []
-                while queries and len(tried_queries) < min(len(queries), 5):
+                all_new_videos: list[SourceVideo] = []
+                seen_video_ids: set[str] = set()
+                while queries and len(all_new_videos) < candidate_pool_size and len(tried_queries) < min(len(queries), 8):
                     candidates_to_try = [q for q in queries if q not in tried_queries]
                     if not candidates_to_try:
                         break
                     chosen_q = select_adaptive_query(db, candidates_to_try)
                     tried_queries.add(chosen_q)
-                    new_videos = list_new_videos_youtube(
+                    batch = list_new_videos_youtube(
                         db, channel_input=channel_id, playlist_id=playlist_id,
-                        search_query=chosen_q, max_videos=candidate_pool_size,
+                        search_query=chosen_q, max_videos=candidate_pool_size - len(all_new_videos),
                         dedup_days=dedup_days
                     )
-                    if new_videos:
+                    for v in batch:
+                        vid = getattr(v, "yt_video_id", None) or v.video_id
+                        if vid not in seen_video_ids:
+                            seen_video_ids.add(vid)
+                            all_new_videos.append(v)
+                    if len(all_new_videos) >= candidate_pool_size:
                         break
-                    logger.info(f"Query '{chosen_q}' yielded 0 new candidates; trying next query from pool...")
+                    if not batch:
+                        logger.info(f"Query '{chosen_q}' yielded 0 new candidates; trying next query from pool...")
+                    else:
+                        logger.info(f"Query '{chosen_q}' added {len(batch)} candidates (pool now {len(all_new_videos)}/{candidate_pool_size}); checking next topic...")
+                new_videos = all_new_videos
             else:
                 new_videos = list_new_videos_youtube(
                     db, channel_input=channel_id, playlist_id=playlist_id,
